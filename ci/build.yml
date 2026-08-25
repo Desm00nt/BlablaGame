@@ -4,6 +4,10 @@ on:
   push:
   workflow_dispatch:
 
+env:
+  GODOT_VERSION: 4.3
+  EXPORT_NAME: Game
+
 jobs:
   build-windows:
     name: Build Windows Desktop
@@ -15,14 +19,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Create build directories
-        run: mkdir -p build/windows
+      - name: Set up export templates
+        # The image ships templates under /root, but the container runs with
+        # HOME=/github/home, so Godot looks there. Copy them into place.
+        run: |
+          mkdir -p ~/.local/share/godot/export_templates
+          cp -r "/root/.local/share/godot/export_templates/${GODOT_VERSION}.stable" \
+                ~/.local/share/godot/export_templates/
+          ls -la ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
 
       - name: Import project assets
         run: godot --headless --import
 
+      - name: Create build directories
+        run: mkdir -p build/windows
+
       - name: Export release (Windows Desktop)
-        run: godot --headless --export-release "Windows Desktop" build/windows/Game.exe
+        run: godot --headless --export-release "Windows Desktop" build/windows/${EXPORT_NAME}.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
