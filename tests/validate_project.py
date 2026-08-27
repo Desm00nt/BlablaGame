@@ -13,6 +13,8 @@ import os
 import re
 import math
 import sys
+import subprocess
+from shutil import which
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAIL = []
@@ -363,6 +365,147 @@ def glsl_lint():
               f"helpers declared before use")
 
 
+def gdscript_parse():
+    """Parse every .gd with gdtoolkit's gdparse - the real Godot 4 grammar.
+
+    This is not a substitute for running the engine, but it catches what bracket
+    counting cannot. It already caught an implicit string-literal concatenation
+    in world_generator.gd that the bracket check waved through and that the
+    export CI also waved through, because --export-release never compiles
+    GDScript.
+
+    Reports SKIPPED loudly rather than passing silently if gdtoolkit is absent:
+      pip install "gdtoolkit==4.*"
+    """
+    exe = os.environ.get("GDPARSE", "gdparse")
+    if which(exe) is None:
+        print("[10] gdparse NOT FOUND - GDScript parsing SKIPPED "
+              "(pip install \"gdtoolkit==4.*\")")
+        return
+    files = [os.path.join("scripts", f) for f in sorted(os.listdir(os.path.join(ROOT, "scripts")))
+             if f.endswith(".gd")]
+    files.append("tests/smoke_test.gd")
+    bad = 0
+    for f in files:
+        r = subprocess.run([exe, f], cwd=ROOT, capture_output=True, text=True)
+        if r.returncode != 0:
+            bad += 1
+            print(f"  FAIL {f}\n{r.stdout}{r.stderr}")
+    check(bad == 0, f"{bad} file(s) failed to parse as GDScript")
+    print(f"[10] gdparse: {len(files)} files parsed with the Godot 4 grammar, {bad} errors")
+
+
+def _balanced(text, open_index):
+    """Return the text inside the brackets starting at open_index."""
+    depth = 0
+    for i in range(open_index, len(text)):
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return text[open_index + 1:i]
+    return text[open_index + 1:]
+
+
+def _split_top_level(expr):
+    parts, depth, cur, in_str = [], 0, "", False
+    i = 0
+    while i < len(expr):
+        ch = expr[i]
+        if in_str:
+            cur += ch
+            if ch == "\\" and i + 1 < len(expr):
+                cur += expr[i + 1]
+                i += 2
+                continue
+            if ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+            cur += ch
+        elif ch in "([{":
+            depth += 1
+            cur += ch
+        elif ch in ")]}":
+            depth -= 1
+            cur += ch
+        elif ch == "," and depth == 0:
+            parts.append(cur.strip())
+            cur = ""
+        else:
+            cur += ch
+        i += 1
+    if cur.strip():
+        parts.append(cur.strip())
+    return parts
+
+
+def format_strings():
+    """Every % format must have a matching number of arguments.
+
+    Handles both forms: `"...%d" % value` and `"...%d %d" % [a, b]`.
+    The format operator is the first top-level '%' outside any string literal;
+    only literals BEFORE it belong to the format string, because the argument
+    list may contain further literals of its own.
+    """
+    files = [os.path.join("scripts", f) for f in sorted(os.listdir(os.path.join(ROOT, "scripts")))
+             if f.endswith(".gd")]
+    files.append("tests/smoke_test.gd")
+    names = r"print|push_error|push_warning|append|_expect"
+    checked = 0
+    for path in files:
+        src = read(path)
+        for m in re.finditer(rf"\b(?:{names})\s*\(", src):
+            call = _balanced(src, m.end() - 1)
+            lineno = src[:m.start()].count("\n") + 1
+
+            # walk once, tracking strings and depth, to locate the format operator
+            fmt_at = None
+            depth = 0
+            in_str = False
+            i = 0
+            while i < len(call):
+                ch = call[i]
+                if in_str:
+                    if ch == "\\":
+                        i += 2
+                        continue
+                    if ch == '"':
+                        in_str = False
+                elif ch == '"':
+                    in_str = True
+                elif ch in "([{":
+                    depth += 1
+                elif ch in ")]}":
+                    depth -= 1
+                elif ch == "%" and depth == 0:
+                    if i + 1 < len(call) and call[i + 1] == "%":
+                        i += 2
+                        continue
+                    fmt_at = i
+                    break
+                i += 1
+
+            head = call if fmt_at is None else call[:fmt_at]
+            joined = "".join(mm.group(1) for mm in re.finditer(r'"((?:[^"\\]|\\.)*)"', head))
+            specs = len(re.findall(r"%[-+ #0]*[\d.]*[diouxXeEfgGcs]", joined.replace("%%", "")))
+
+            if fmt_at is None:
+                check(specs == 0,
+                      f"{path}:{lineno}: literal has {specs} specifier(s) but no % operator")
+                continue
+            arg = call[fmt_at + 1:].strip()
+            if arg.startswith("[") and arg.endswith("]"):
+                nargs = len(_split_top_level(arg[1:-1]))
+            else:
+                nargs = 1  # single value form
+            checked += 1
+            check(specs == nargs,
+                  f"{path}:{lineno}: {specs} specifier(s) vs {nargs} argument(s) in: {joined[:60]}")
+    print(f"[11] % format strings: {checked} formatted calls, specifiers match arguments")
+
+
 def main():
     for tscn in ("scenes/main.tscn", "scenes/player.tscn", "tests/smoke.tscn"):
         validate_tscn(tscn)
@@ -380,6 +523,8 @@ def main():
     scene_contract()
     assets()
     glsl_lint()
+    format_strings()
+    gdscript_parse()
     print()
     if FAIL:
         print(f"{len(FAIL)} FAILURE(S):")

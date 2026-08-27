@@ -50,8 +50,12 @@ func _ready() -> void:
 	_build_trees()
 	_build_rocks()
 	var t2 := Time.get_ticks_msec()
-	print("[WorldGenerator] collision %d faces in %d ms | %d MultiMesh instances in %d chunks "
-			"in %d ms (seed %d)"
+	# GDScript has no implicit string-literal concatenation, so the two parts are
+	# joined with an explicit +. The concatenation is parenthesised because %
+	# binds tighter than +, and without it the format would apply to the second
+	# literal alone.
+	print(("[WorldGenerator] collision %d faces in %d ms | %d MultiMesh instances in %d chunks "
+			+ "in %d ms (seed %d)")
 			% [_collision_faces, t1 - t0, _total_instances, _chunks, t2 - t1, seed_value])
 
 

@@ -43,6 +43,11 @@ jobs:
         run: python3 tests/check_world_layout.py
       - name: Scene references, budget guards, noise ceiling
         run: python3 tests/validate_project.py
+      - name: GDScript syntax (real Godot 4 grammar)
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install "gdtoolkit==4.*"
+          gdparse scripts/*.gd tests/smoke_test.gd
 
   headless-smoke:
     name: Load main.tscn headless

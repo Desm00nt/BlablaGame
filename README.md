@@ -38,10 +38,18 @@ Godot в CI только экспортирует проект, поэтому �
 отдельно (движок для этого не нужен):
 
 ```bash
+pip install "gdtoolkit==4.*"               # один раз, для проверки синтаксиса
 python3 tests/check_noise_parity.py    # CPU/GPU шум совпадают, рельеф валиден
 python3 tests/check_world_layout.py    # бюджет инстансов, чанки, ничего не в воде
-python3 tests/validate_project.py      # load_steps, ссылки, budget, noise-лимит
+python3 tests/validate_project.py      # load_steps, ссылки, budget, noise, gdparse
 ```
+
+`validate_project.py` прогоняет каждый `.gd` через `gdparse` — настоящий парсер
+GDScript из Godot 4. Без установленного gdtoolkit он громко пишет `SKIPPED`, а не
+делает вид, что всё прошло. Это не паранойя: `gdparse` уже нашёл в
+`world_generator.gd` неявную склейку строковых литералов, которую пропустили и
+проверка скобок, и **зелёный CI** — `--export-release` вообще не компилирует
+GDScript.
 
 Плюс смоук-тест, который реально грузит `main.tscn` и проверяет результат
 (коллизия совпадает с `terrain_height()`, игрок не проваливается, 2081 инстанс
