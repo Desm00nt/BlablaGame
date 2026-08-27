@@ -506,6 +506,47 @@ def format_strings():
     print(f"[11] % format strings: {checked} formatted calls, specifiers match arguments")
 
 
+def shader_builtins():
+    """Every Godot built-in must be used in a stage where it actually exists.
+
+    Table taken from the Godot 4.3 shader reference (spatial + sky). A name used
+    in the wrong stage is a compile error that neither gdparse nor the export
+    step can see, because --headless never compiles shaders.
+    """
+    vertex = {"VERTEX", "NORMAL", "TANGENT", "BINORMAL", "UV", "UV2", "COLOR",
+              "POINT_SIZE", "MODEL_MATRIX", "MODELVIEW_MATRIX", "PROJECTION_MATRIX",
+              "VIEW_MATRIX", "INV_VIEW_MATRIX", "INSTANCE_ID", "INSTANCE_CUSTOM",
+              "NODE_POSITION_WORLD", "NODE_POSITION_VIEW", "CAMERA_POSITION_WORLD",
+              "VIEWPORT_SIZE", "POSITION", "ROUGHNESS", "TIME", "PI", "TAU", "E"}
+    fragment = {"VERTEX", "NORMAL", "TANGENT", "BINORMAL", "UV", "UV2", "COLOR",
+                "VIEW", "SCREEN_UV", "FRAGCOORD", "FRONT_FACING", "MODEL_MATRIX",
+                "VIEW_MATRIX", "INV_VIEW_MATRIX", "PROJECTION_MATRIX", "ALBEDO",
+                "ALPHA", "METALLIC", "ROUGHNESS", "SPECULAR", "EMISSION", "AO",
+                "RIM", "DEPTH", "NODE_POSITION_WORLD", "CAMERA_POSITION_WORLD",
+                "VIEWPORT_SIZE", "TIME", "PI", "TAU", "E"}
+    sky = {"EYEDIR", "SCREEN_UV", "SKY_COORDS", "COLOR", "ALPHA", "FOG",
+           "HALF_RES_COLOR", "QUARTER_RES_COLOR", "TIME", "PI", "TAU", "E"}
+    stages = {"vertex": vertex, "fragment": fragment, "sky": sky}
+
+    for path in ("shaders/terrain.gdshader", "shaders/water.gdshader", "shaders/sky.gdshader"):
+        src = re.sub(r"//.*", "", read(path))
+        declared = set(re.findall(r"\b(?:const|uniform)\s+\w+\s+(\w+)", src))
+        declared |= set(re.findall(r"\bvarying\s+\w+\s+(\w+)", src))
+        for stage, allowed in stages.items():
+            m = re.search(rf"void {stage}\s*\(\s*\)\s*\{{", src)
+            if not m:
+                continue
+            body = src[m.end():src.index("\n}", m.end())]
+            used = set(re.findall(r"\b([A-Z][A-Z0-9_]{2,})\b", body))
+            for name in sorted(used):
+                if name in declared:
+                    continue
+                check(name in allowed,
+                      f"{path}: {name} is not a {stage}() built-in in Godot 4.3 "
+                      f"(or is misspelled) - would fail to compile")
+        print(f"[12] {os.path.basename(path)}: every built-in used in a valid stage")
+
+
 def main():
     for tscn in ("scenes/main.tscn", "scenes/player.tscn", "tests/smoke.tscn"):
         validate_tscn(tscn)
@@ -524,6 +565,7 @@ def main():
     assets()
     glsl_lint()
     format_strings()
+    shader_builtins()
     gdscript_parse()
     print()
     if FAIL:
