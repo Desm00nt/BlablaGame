@@ -364,10 +364,10 @@ def glsl_lint():
 
 
 def main():
-    for tscn in ("scenes/main.tscn", "scenes/player.tscn"):
+    for tscn in ("scenes/main.tscn", "scenes/player.tscn", "tests/smoke.tscn"):
         validate_tscn(tscn)
     for gd in ("scripts/main.gd", "scripts/player.gd", "scripts/world_generator.gd",
-               "scripts/time_manager.gd", "scripts/terrain_noise.gd"):
+               "scripts/time_manager.gd", "scripts/terrain_noise.gd", "tests/smoke_test.gd"):
         balance(gd)
     for sh in ("shaders/terrain.gdshader", "shaders/water.gdshader", "shaders/sky.gdshader"):
         balance(sh)

@@ -43,6 +43,22 @@ python3 tests/check_world_layout.py    # бюджет инстансов, чан
 python3 tests/validate_project.py      # load_steps, ссылки, budget, noise-лимит
 ```
 
+Плюс смоук-тест, который реально грузит `main.tscn` и проверяет результат
+(коллизия совпадает с `terrain_height()`, игрок не проваливается, 2081 инстанс
+на месте, базис солнца ортонормален):
+
+```bash
+godot --headless --quit-after 240 res://tests/smoke.tscn
+```
+
+Готовый воркфлоу для него лежит в `ci/smoke.yml`, но **не активен**: GitHub App
+этой ветки не может создавать файлы в `.github/workflows/` (нет права
+`workflows`). Чтобы включить — скопировать `ci/smoke.yml` в
+`.github/workflows/smoke.yml`.
+
+`tests/` исключён из экспорта (`exclude_filter` в `export_presets.cfg`), в сборку
+игры он не попадает.
+
 ## Сборка
 
 GitHub Actions, `.github/workflows/build2.yml`, образ `barichello/godot-ci:4.3`,
