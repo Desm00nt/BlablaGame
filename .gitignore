@@ -5,6 +5,10 @@
 build/
 export/
 
+# Python (tests/ helper scripts)
+__pycache__/
+*.pyc
+
 # OS / editor cruft
 .DS_Store
 *.swp

@@ -11,7 +11,18 @@ extends CharacterBody3D
 @export var camera_height: float = 2.0
 @export var zoom_step: float = 1.0
 
+# Phase 3 additions.
+@export var sprint_multiplier: float = 1.8
+@export var camera_lerp_speed: float = 14.0
+@export var tilt_amount: float = 0.055   # radians of roll at full turn rate
+@export var tilt_lerp_speed: float = 9.0
+
 var camera_distance: float = 5.0
+
+var _target_camera_distance: float = 5.0
+var _tilt: float = 0.0
+var _yaw_delta: float = 0.0
+var _has_sprint: bool = false
 
 @onready var camera_pivot: Node3D = $CameraPivot
 @onready var camera: Camera3D = $CameraPivot/Camera3D
@@ -21,6 +32,11 @@ var camera_distance: float = 5.0
 func _ready() -> void:
 	# Capture the mouse for third-person look.
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_target_camera_distance = camera_distance
+	# Guarded so the script still runs if project.godot lacks the action.
+	_has_sprint = InputMap.has_action("sprint")
+	if not _has_sprint:
+		push_warning("[Player] input action 'sprint' is not defined - sprint disabled")
 	_update_camera()
 
 
@@ -33,19 +49,40 @@ func _physics_process(delta: float) -> void:
 	if Input.is_action_just_pressed("jump") and is_on_floor():
 		velocity.y = jump_velocity
 
+	# Sprint is a simple speed multiplier; the deceleration below scales with it
+	# so stopping does not feel slower than running.
+	var current_speed := speed
+	if _has_sprint and Input.is_action_pressed("sprint"):
+		current_speed *= sprint_multiplier
+
 	# Read WASD input in the character's local space.
 	var input_dir: Vector2 = Input.get_vector("move_left", "move_right", "move_forward", "move_backward")
 	var direction: Vector3 = (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
 
 	# Horizontal movement (instant acceleration/deceleration is fine for the prototype).
 	if direction:
-		velocity.x = direction.x * speed
-		velocity.z = direction.z * speed
+		velocity.x = direction.x * current_speed
+		velocity.z = direction.z * current_speed
 	else:
-		velocity.x = move_toward(velocity.x, 0.0, speed)
-		velocity.z = move_toward(velocity.z, 0.0, speed)
+		velocity.x = move_toward(velocity.x, 0.0, current_speed)
+		velocity.z = move_toward(velocity.z, 0.0, current_speed)
 
 	move_and_slide()
+
+	_smooth_camera(delta)
+
+
+## Frame-rate independent exponential smoothing, so the camera behaves the same
+## at 30 fps and at 144 fps.
+func _smooth_camera(delta: float) -> void:
+	var k := 1.0 - exp(-camera_lerp_speed * delta)
+	camera_distance = lerpf(camera_distance, _target_camera_distance, k)
+
+	var target_tilt := clampf(_yaw_delta * 7.0, -tilt_amount, tilt_amount)
+	_tilt = lerpf(_tilt, target_tilt, 1.0 - exp(-tilt_lerp_speed * delta))
+	_yaw_delta = 0.0
+
+	_update_camera()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -60,11 +97,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		if event.pressed:
 			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-				camera_distance = clamp(camera_distance - zoom_step, first_person_distance, max_camera_distance)
-				_update_camera()
+				_target_camera_distance = clampf(_target_camera_distance - zoom_step,
+						first_person_distance, max_camera_distance)
 			elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-				camera_distance = clamp(camera_distance + zoom_step, first_person_distance, max_camera_distance)
-				_update_camera()
+				_target_camera_distance = clampf(_target_camera_distance + zoom_step,
+						first_person_distance, max_camera_distance)
 
 	# Re-capture on click in case it was released.
 	if event is InputEventMouseButton and event.pressed:
@@ -74,7 +111,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	# Mouse look only while the cursor is captured.
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		# Horizontal mouse movement rotates the whole body (yaw).
-		rotate_y(-event.relative.x * mouse_sensitivity)
+		var yaw := -event.relative.x * mouse_sensitivity
+		rotate_y(yaw)
+		_yaw_delta += yaw
 
 		# Vertical mouse movement rotates the camera pivot (pitch), clamped to +-70 degrees.
 		camera_pivot.rotate_x(-event.relative.y * mouse_sensitivity)
@@ -95,3 +134,7 @@ func _update_camera() -> void:
 	else:
 		body_mesh.visible = true
 		camera.look_at(camera_pivot.global_position, Vector3.UP)
+
+	# look_at() rebuilds the basis, so the roll has to be applied afterwards.
+	if absf(_tilt) > 0.0001:
+		camera.rotate_object_local(Vector3(0.0, 0.0, 1.0), _tilt)
