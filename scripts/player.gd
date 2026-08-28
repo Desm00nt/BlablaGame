@@ -24,6 +24,13 @@ var _tilt: float = 0.0
 var _yaw_delta: float = 0.0
 var _has_sprint: bool = false
 
+# Startup self-diagnostics. Movement is impossible to debug from a screenshot, so
+# for the first few seconds the character reports everything that could stop it:
+# is _physics_process running at all, is input arriving, is there a floor, and
+# did move_and_slide() hit something. Silent after DIAG_FRAMES.
+const DIAG_FRAMES: int = 300
+var _diag_frames: int = 0
+
 @onready var camera_pivot: Node3D = $CameraPivot
 @onready var camera: Camera3D = $CameraPivot/Camera3D
 @onready var body_mesh: MeshInstance3D = $MeshInstance3D
@@ -37,10 +44,19 @@ func _ready() -> void:
 	_has_sprint = InputMap.has_action("sprint")
 	if not _has_sprint:
 		push_warning("[Player] input action 'sprint' is not defined - sprint disabled")
+	# If project.godot failed to load its [input] section, get_vector() silently
+	# returns Vector2.ZERO and the character simply never moves. Say so loudly.
+	for action: String in ["move_forward", "move_backward", "move_left", "move_right", "jump"]:
+		if not InputMap.has_action(action):
+			push_error("[Player] input action '%s' is missing - movement broken" % action)
 	_update_camera()
 
 
 func _physics_process(delta: float) -> void:
+	_diag_frames += 1
+	if _diag_frames <= DIAG_FRAMES and _diag_frames % 30 == 1:
+		_report()
+
 	# Apply gravity while not on the floor.
 	if not is_on_floor():
 		velocity.y -= gravity * delta
@@ -70,6 +86,23 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 
 	_smooth_camera(delta)
+
+
+## One line of state per second for the first DIAG_FRAMES frames. Each field
+## rules out one failure mode:
+##   pos/vel not changing  -> _physics_process is not running at all
+##   input=(0, 0)          -> keyboard input is not reaching the action map
+##   on_floor=false, y falling -> no collider under the character
+##   slides>0 and vel.x/z==0   -> a collider is cancelling the movement
+func _report() -> void:
+	var terrain := get_node_or_null(^"../TerrainBody")
+	var terrain_state := "found"
+	if terrain == null:
+		terrain_state = "MISSING - character will fall forever"
+	var input_dir: Vector2 = Input.get_vector("move_left", "move_right", "move_forward", "move_backward")
+	print("[PlayerDiag] frame=%d pos=%s vel=%s on_floor=%s input=%s slides=%d terrain_body=%s"
+			% [_diag_frames, position, velocity, is_on_floor(), input_dir,
+				get_slide_collision_count(), terrain_state])
 
 
 ## Frame-rate independent exponential smoothing, so the camera behaves the same
