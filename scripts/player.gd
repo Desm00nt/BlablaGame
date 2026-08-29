@@ -31,6 +31,10 @@ var _has_sprint: bool = false
 const DIAG_FRAMES: int = 300
 var _diag_frames: int = 0
 
+## False once the player has deliberately freed the cursor with Escape, so
+## regaining window focus does not snap it back against their wish.
+var _capture_wanted: bool = true
+
 @onready var camera_pivot: Node3D = $CameraPivot
 @onready var camera: Camera3D = $CameraPivot/Camera3D
 @onready var body_mesh: MeshInstance3D = $MeshInstance3D
@@ -38,6 +42,7 @@ var _diag_frames: int = 0
 
 func _ready() -> void:
 	# Capture the mouse for third-person look.
+	_capture_wanted = true
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_target_camera_distance = camera_distance
 	# Guarded so the script still runs if project.godot lacks the action.
@@ -50,6 +55,18 @@ func _ready() -> void:
 		if not InputMap.has_action(action):
 			push_error("[Player] input action '%s' is missing - movement broken" % action)
 	_update_camera()
+	print("[Player] ready. If WASD does nothing, click the game window once: an "
+			+ "exported Godot game can start unfocused and drop all input until then.")
+
+
+func _notification(what: int) -> void:
+	# godotengine/godot#74619: an exported game can come up without keyboard
+	# focus, and then every key and mouse event is dropped until the window is
+	# clicked - which reads exactly like "the character will not move". Godot
+	# also drops MOUSE_MODE_CAPTURED when the window loses focus, so re-assert it
+	# on the way back in instead of leaving mouse look dead for the session.
+	if what == NOTIFICATION_APPLICATION_FOCUS_IN and _capture_wanted:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 func _physics_process(delta: float) -> void:
@@ -119,12 +136,14 @@ func _smooth_camera(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	# Toggle mouse capture with Escape.
+	# Toggle mouse capture with Escape. The intent is remembered so that
+	# regaining window focus does not immediately undo it.
 	if event.is_action_pressed("ui_cancel"):
-		if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-		else:
+		_capture_wanted = Input.mouse_mode != Input.MOUSE_MODE_CAPTURED
+		if _capture_wanted:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		else:
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 	# Mouse wheel zoom in/out between first and third person.
 	if event is InputEventMouseButton:
@@ -139,6 +158,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	# Re-capture on click in case it was released.
 	if event is InputEventMouseButton and event.pressed:
 		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+			_capture_wanted = true
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 	# Mouse look only while the cursor is captured.
