@@ -547,6 +547,53 @@ def shader_builtins():
         print(f"[12] {os.path.basename(path)}: every built-in used in a valid stage")
 
 
+def sky_cost():
+    """The sky is the most expensive thing in the scene - guard its two knobs.
+
+    Godot's Sky.PROCESS_MODE_AUTOMATIC resolves to PROCESS_MODE_REALTIME when the
+    sky shader reads TIME, which regenerates the whole radiance cubemap every
+    frame. That alone can pin the GPU on a 2 GB card, so both the shader and the
+    Sky resource are checked here.
+    """
+    sky = read("shaders/sky.gdshader")
+    entry = sky.index("void sky")
+    # Strip // comments first: the file legitimately mentions TIME in the comment
+    # explaining why it is not used, and that must not read as a violation.
+    body = re.sub(r"//.*", "", sky[entry:])
+    offset = sky[:entry].count("\n") + 1
+    for m in re.finditer(r"\bTIME\b", body):
+        line = offset + body[:m.start()].count("\n")
+        check(False, "shaders/sky.gdshader:%d uses TIME in sky() - this forces "
+                     "PROCESS_MODE_REALTIME and re-renders the radiance cubemap "
+                     "every frame. Drive it from the cloud_time uniform instead." % line)
+
+    tscn = read("scenes/main.tscn")
+    m = re.search(r'\[sub_resource type="Sky"[^\]]*\](.*?)(?=\n\[|\Z)', tscn, re.S)
+    check(m is not None, "scenes/main.tscn has no Sky sub-resource")
+    if m is not None:
+        block = m.group(1)
+        pm = re.search(r"^process_mode = (\d+)", block, re.M)
+        check(pm is not None,
+              "Sky has no process_mode - it defaults to 0 (AUTOMATIC), which "
+              "becomes REALTIME as soon as the shader touches TIME")
+        if pm is not None:
+            check(pm.group(1) == "2",
+                  "Sky.process_mode is %s, expected 2 (PROCESS_MODE_INCREMENTAL)" % pm.group(1))
+        rs = re.search(r"^radiance_size = (\d+)", block, re.M)
+        size = rs.group(1) if rs else "default 256"
+        print("[13] Sky.process_mode = %s (2 = INCREMENTAL), radiance_size = %s"
+              % (pm.group(1) if pm else "unset", size))
+
+    tm = read("scripts/time_manager.gd")
+    rate = re.search(r"update_rate: float = ([\d.]+)", tm)
+    if rate is not None:
+        check(float(rate.group(1)) <= 10.0,
+              "time_manager.gd update_rate is %s Hz - every sky uniform write "
+              "invalidates the radiance cubemap" % rate.group(1))
+    check("_cloud_time" in tm and 'set_shader_parameter("cloud_time"' in tm,
+          "time_manager.gd does not drive the cloud_time uniform that replaced TIME")
+
+
 def main():
     for tscn in ("scenes/main.tscn", "scenes/player.tscn", "tests/smoke.tscn"):
         validate_tscn(tscn)
@@ -566,6 +613,7 @@ def main():
     glsl_lint()
     format_strings()
     shader_builtins()
+    sky_cost()
     gdscript_parse()
     print()
     if FAIL:

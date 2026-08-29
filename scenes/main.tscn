@@ -14,10 +14,18 @@ shader = ExtResource("5")
 shader_parameter/time_of_day = 0.3
 shader_parameter/cloud_cover = 0.45
 shader_parameter/cloud_speed = 0.012
+shader_parameter/cloud_time = 0.0
 shader_parameter/star_density = 0.55
 
 [sub_resource type="Sky" id="Sky_env"]
 sky_material = SubResource("ShaderMaterial_sky")
+; PROCESS_MODE_INCREMENTAL (2): regenerate the radiance cubemap over several
+; frames instead of every frame. AUTOMATIC (0) would pick REALTIME the moment
+; the sky shader touches TIME, which is the single largest GPU cost in the scene.
+process_mode = 2
+; RADIANCE_SIZE_128 (2). The real-time fast filter is capped at 256 anyway, and
+; 128 is plenty for ambient/reflections - it quarters the cubemap work.
+radiance_size = 2
 
 [sub_resource type="Environment" id="Environment_env"]
 background_mode = 2

@@ -6,10 +6,11 @@ extends Node
 ## CPU cost is deliberately minimal:
 ##   * `time_of_day` is the only state; it is a single float accumulated per
 ##     frame. Nothing is allocated in the loop and no nodes are looked up.
-##   * The expensive part is not the maths but the fact that changing the sky
+##   * The expensive part is not the maths but the fact that changing ANY sky
 ##     uniform makes Godot re-render the sky radiance cubemap. So all GPU-facing
-##     writes are throttled to `update_rate` Hz. At 30 Hz the sun still moves
-##     1.2 deg/s * 1/30 s = 0.04 deg per tick, which is invisible.
+##     writes are throttled to `update_rate` Hz. At 6 Hz the sun still moves
+##     1.2 deg/s * 1/6 s = 0.2 deg per tick, which is invisible, while the
+##     cubemap is invalidated 10x less often than at the 60 Hz frame rate.
 ##
 ## The sun direction formula is duplicated in shaders/sky.gdshader
 ## (sun_direction()) - SUN_TILT must match there.
@@ -18,7 +19,7 @@ const SUN_TILT: float = 0.40
 
 @export var day_length_seconds: float = 300.0
 @export_range(0.0, 1.0) var start_time_of_day: float = 0.30
-@export var update_rate: float = 30.0
+@export var update_rate: float = 6.0
 @export var min_ambient_energy: float = 0.35
 @export var max_ambient_energy: float = 1.0
 @export var sun_energy_night: float = 0.03
@@ -28,6 +29,10 @@ const SUN_TILT: float = 0.40
 var time_of_day: float = 0.30
 
 var _accum: float = 0.0
+## Monotonic seconds, fed to the sky shader as `cloud_time`. Deliberately NOT
+## derived from time_of_day, which wraps at midnight and would make the clouds
+## jump. Also deliberately not the shader built-in TIME: see sky.gdshader.
+var _cloud_time: float = 0.0
 var _sun: DirectionalLight3D
 var _env: Environment
 var _sky_mat: ShaderMaterial
@@ -53,6 +58,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	time_of_day = fposmod(time_of_day + delta / maxf(day_length_seconds, 0.001), 1.0)
+	_cloud_time += delta
 	_accum += delta
 	if _accum < 1.0 / maxf(update_rate, 1.0):
 		return
@@ -86,6 +92,7 @@ func _apply() -> void:
 
 	if _sky_mat != null:
 		_sky_mat.set_shader_parameter("time_of_day", time_of_day)
+		_sky_mat.set_shader_parameter("cloud_time", _cloud_time)
 
 	if _env != null:
 		# ambient_light_source is SKY in main.tscn, so the sky itself provides the

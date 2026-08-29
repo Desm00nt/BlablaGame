@@ -22,6 +22,12 @@ const int CLOUD_OCTAVES = 3;
 uniform float time_of_day : hint_range(0.0, 1.0) = 0.30;
 uniform float cloud_cover : hint_range(0.0, 1.0) = 0.45;
 uniform float cloud_speed : hint_range(0.0, 0.2) = 0.012;
+// Cloud drift is driven by a uniform written from time_manager.gd instead of the
+// built-in TIME. Using TIME here makes Sky.PROCESS_MODE_AUTOMATIC resolve to
+// PROCESS_MODE_REALTIME, which regenerates the whole 256x256x6 radiance cubemap
+// every single frame - on a 2 GB card that alone can pin the GPU. With a uniform
+// the mode resolves to INCREMENTAL and the cubemap updates over several frames.
+uniform float cloud_time = 0.0;
 uniform float star_density : hint_range(0.0, 1.0) = 0.55;
 uniform vec3 sun_tint = vec3(1.00, 0.86, 0.66);
 
@@ -115,7 +121,7 @@ void sky() {
 	float cloud_mask = 0.0;
 	if (up > 0.02) {
 		vec2 cuv = dir.xz / max(up, 0.06) * 0.30;
-		cuv += vec2(TIME * cloud_speed, TIME * cloud_speed * 0.63);
+		cuv += vec2(cloud_time * cloud_speed, cloud_time * cloud_speed * 0.63);
 		float n = fbm(cuv);
 		float edge = 1.0 - cloud_cover;
 		cloud_mask = smoothstep(edge, edge + 0.22, n) * smoothstep(0.02, 0.16, up);
