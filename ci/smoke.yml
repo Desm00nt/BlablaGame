@@ -1,0 +1,70 @@
+# Headless smoke test.
+#
+# NOT ACTIVE. This lives in ci/ rather than .github/workflows/ because the
+# GitHub App used for this branch was rejected when trying to create a workflow:
+#
+#   ! [remote rejected] refusing to allow a GitHub App to create or update
+#     workflow `.github/workflows/smoke.yml` without `workflows` permission
+#
+# To activate, copy this file to .github/workflows/smoke.yml (or grant the app
+# the "Workflows" permission and move it). Until then run the checks locally:
+#
+#   python3 tests/check_noise_parity.py
+#   python3 tests/check_world_layout.py
+#   python3 tests/validate_project.py
+#   godot --headless --import
+#   godot --headless --quit-after 240 res://tests/smoke.tscn
+#
+# Why it exists: build2.yml only exports the project, and --headless uses the
+# dummy renderer, so a green build proves nothing about whether the world is
+# actually built. This runs the real main.tscn and asserts on the result.
+
+name: Smoke
+
+on:
+  push:
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: 4.3
+
+jobs:
+  python-checks:
+    name: Invariant checks (no engine needed)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: CPU/GPU noise parity + landscape sanity
+        run: python3 tests/check_noise_parity.py
+      - name: Instance budget and chunking
+        run: python3 tests/check_world_layout.py
+      - name: Scene references, budget guards, noise ceiling
+        run: python3 tests/validate_project.py
+      - name: GDScript syntax (real Godot 4 grammar)
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install "gdtoolkit==4.*"
+          gdparse scripts/*.gd tests/smoke_test.gd
+
+  headless-smoke:
+    name: Load main.tscn headless
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: barichello/godot-ci:4.3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Import project assets
+        run: godot --headless --import
+
+      - name: Run smoke scene
+        # The grep is the real gate: if the script never ran (parse error,
+        # missing node, crash) --quit-after would otherwise exit 0 and hide it.
+        run: |
+          godot --headless --quit-after 240 res://tests/smoke.tscn 2>&1 | tee smoke.log
+          grep -q "\[Smoke\] PASS" smoke.log

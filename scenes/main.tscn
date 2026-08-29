@@ -1,69 +1,74 @@
-[gd_scene load_steps=17 format=3]
+[gd_scene load_steps=15 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/player.tscn" id="2"]
+[ext_resource type="Shader" path="res://shaders/terrain.gdshader" id="3"]
+[ext_resource type="Shader" path="res://shaders/water.gdshader" id="4"]
+[ext_resource type="Shader" path="res://shaders/sky.gdshader" id="5"]
+[ext_resource type="Script" path="res://scripts/time_manager.gd" id="6"]
+[ext_resource type="Script" path="res://scripts/world_generator.gd" id="7"]
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_grass"]
-albedo_color = Color(0.3, 0.5, 0.2, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_trunk"]
-albedo_color = Color(0.4, 0.25, 0.1, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_leaves"]
-albedo_color = Color(0.15, 0.5, 0.1, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_rock"]
-albedo_color = Color(0.5, 0.5, 0.5, 1)
-
-[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_env"]
-sky_top_color = Color(0.385, 0.53, 0.8, 1)
-sky_horizon_color = Color(0.65, 0.75, 0.9, 1)
-ground_bottom_color = Color(0.25, 0.3, 0.35, 1)
-ground_horizon_color = Color(0.65, 0.75, 0.9, 1)
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_sky"]
+render_priority = 0
+shader = ExtResource("5")
+shader_parameter/time_of_day = 0.3
+shader_parameter/cloud_cover = 0.45
+shader_parameter/cloud_speed = 0.012
+shader_parameter/cloud_time = 0.0
+shader_parameter/star_density = 0.55
 
 [sub_resource type="Sky" id="Sky_env"]
-sky_material = SubResource("ProceduralSkyMaterial_env")
+sky_material = SubResource("ShaderMaterial_sky")
+; PROCESS_MODE_INCREMENTAL (2): regenerate the radiance cubemap over several
+; frames instead of every frame. AUTOMATIC (0) would pick REALTIME the moment
+; the sky shader touches TIME, which is the single largest GPU cost in the scene.
+process_mode = 2
+; RADIANCE_SIZE_128 (2). The real-time fast filter is capped at 256 anyway, and
+; 128 is plenty for ambient/reflections - it quarters the cubemap work.
+radiance_size = 2
 
 [sub_resource type="Environment" id="Environment_env"]
 background_mode = 2
 sky = SubResource("Sky_env")
-ambient_light_source = 2
-ambient_light_color = Color(0.7, 0.75, 0.8, 1)
-ambient_light_energy = 0.5
+ambient_light_source = 3
+ambient_light_energy = 0.9
 tonemap_mode = 3
+ssao_enabled = true
+ssao_radius = 1.0
+ssao_intensity = 1.6
+ssao_power = 1.5
+glow_enabled = true
+glow_intensity = 0.3
+glow_bloom = 0.1
+glow_hdr_threshold = 0.9
 fog_enabled = true
-fog_light_color = Color(0.7, 0.75, 0.8, 1)
-fog_density = 0.01
-fog_aerial_perspective = 0.5
+fog_light_color = Color(0.7, 0.78, 0.88, 1)
+fog_density = 0.008
+fog_aerial_perspective = 0.4
+sdfgi_enabled = false
+ss_reflections_enabled = false
+volumetric_fog_enabled = false
 
-[sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
-size = Vector3(200, 1, 200)
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_terrain"]
+render_priority = 0
+shader = ExtResource("3")
 
-[sub_resource type="BoxMesh" id="BoxMesh_floor"]
-size = Vector3(200, 1, 200)
-material = SubResource("StandardMaterial3D_grass")
+[sub_resource type="PlaneMesh" id="PlaneMesh_terrain"]
+material = SubResource("ShaderMaterial_terrain")
+size = Vector2(200, 200)
+subdivide_width = 64
+subdivide_depth = 64
 
-[sub_resource type="CylinderMesh" id="CylinderMesh_trunk"]
-top_radius = 0.3
-bottom_radius = 0.3
-height = 3.0
-material = SubResource("StandardMaterial3D_trunk")
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_water"]
+render_priority = 0
+shader = ExtResource("4")
+shader_parameter/wave_height = 0.16
 
-[sub_resource type="CylinderShape3D" id="CylinderShape3D_trunk"]
-radius = 0.3
-height = 3.0
-
-[sub_resource type="SphereMesh" id="SphereMesh_leaves"]
-radius = 2.0
-height = 4.0
-material = SubResource("StandardMaterial3D_leaves")
-
-[sub_resource type="BoxMesh" id="BoxMesh_rock"]
-size = Vector3(1, 1, 1)
-material = SubResource("StandardMaterial3D_rock")
-
-[sub_resource type="BoxShape3D" id="BoxShape3D_rock"]
-size = Vector3(1, 1, 1)
+[sub_resource type="PlaneMesh" id="PlaneMesh_water"]
+material = SubResource("ShaderMaterial_water")
+size = Vector2(200, 200)
+subdivide_width = 32
+subdivide_depth = 32
 
 [node name="Main" type="Node3D"]
 script = ExtResource("1")
@@ -72,299 +77,29 @@ script = ExtResource("1")
 environment = SubResource("Environment_env")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
-transform = Transform3D(0.866025, 0, 0.5, 0.353553, 0.707107, -0.612372, -0.353553, 0.707107, 0.612372, 0, 10, 0)
-light_color = Color(1, 0.95, 0.8, 1)
-light_energy = 1.2
+transform = Transform3D(0.3894, -0.2846, 0.876, 0, 0.9511, 0.309, -0.9211, -0.1203, 0.3704, 0, 10, 0)
+light_color = Color(1, 0.96, 0.9, 1)
+light_energy = 1.25
 shadow_enabled = true
-
-[node name="Floor" type="StaticBody3D" parent="."]
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Floor"]
-shape = SubResource("BoxShape3D_floor")
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="Floor"]
-mesh = SubResource("BoxMesh_floor")
-
-[node name="Tree_10_15" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 0, 15)
-
-[node name="Trunk" type="MeshInstance3D" parent="Tree_10_15"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-mesh = SubResource("CylinderMesh_trunk")
-
-[node name="Leaves" type="MeshInstance3D" parent="Tree_10_15"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.5, 0)
-mesh = SubResource("SphereMesh_leaves")
-
-[node name="TrunkCollision" type="StaticBody3D" parent="Tree_10_15"]
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Tree_10_15/TrunkCollision"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-shape = SubResource("CylinderShape3D_trunk")
-
-[node name="Tree_-20_8" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 0, 8)
-
-[node name="Trunk" type="MeshInstance3D" parent="Tree_-20_8"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-mesh = SubResource("CylinderMesh_trunk")
-
-[node name="Leaves" type="MeshInstance3D" parent="Tree_-20_8"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.5, 0)
-mesh = SubResource("SphereMesh_leaves")
-
-[node name="TrunkCollision" type="StaticBody3D" parent="Tree_-20_8"]
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Tree_-20_8/TrunkCollision"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-shape = SubResource("CylinderShape3D_trunk")
-
-[node name="Tree_5_-25" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0, -25)
-
-[node name="Trunk" type="MeshInstance3D" parent="Tree_5_-25"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-mesh = SubResource("CylinderMesh_trunk")
-
-[node name="Leaves" type="MeshInstance3D" parent="Tree_5_-25"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.5, 0)
-mesh = SubResource("SphereMesh_leaves")
-
-[node name="TrunkCollision" type="StaticBody3D" parent="Tree_5_-25"]
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Tree_5_-25/TrunkCollision"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-shape = SubResource("CylinderShape3D_trunk")
-
-[node name="Tree_-15_-10" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -15, 0, -10)
-
-[node name="Trunk" type="MeshInstance3D" parent="Tree_-15_-10"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-mesh = SubResource("CylinderMesh_trunk")
-
-[node name="Leaves" type="MeshInstance3D" parent="Tree_-15_-10"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.5, 0)
-mesh = SubResource("SphereMesh_leaves")
-
-[node name="TrunkCollision" type="StaticBody3D" parent="Tree_-15_-10"]
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Tree_-15_-10/TrunkCollision"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-shape = SubResource("CylinderShape3D_trunk")
-
-[node name="Tree_30_5" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30, 0, 5)
-
-[node name="Trunk" type="MeshInstance3D" parent="Tree_30_5"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-mesh = SubResource("CylinderMesh_trunk")
-
-[node name="Leaves" type="MeshInstance3D" parent="Tree_30_5"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.5, 0)
-mesh = SubResource("SphereMesh_leaves")
-
-[node name="TrunkCollision" type="StaticBody3D" parent="Tree_30_5"]
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Tree_30_5/TrunkCollision"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-shape = SubResource("CylinderShape3D_trunk")
-
-[node name="Tree_-8_30" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8, 0, 30)
-
-[node name="Trunk" type="MeshInstance3D" parent="Tree_-8_30"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-mesh = SubResource("CylinderMesh_trunk")
-
-[node name="Leaves" type="MeshInstance3D" parent="Tree_-8_30"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.5, 0)
-mesh = SubResource("SphereMesh_leaves")
-
-[node name="TrunkCollision" type="StaticBody3D" parent="Tree_-8_30"]
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Tree_-8_30/TrunkCollision"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-shape = SubResource("CylinderShape3D_trunk")
-
-[node name="Tree_25_-20" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 25, 0, -20)
-
-[node name="Trunk" type="MeshInstance3D" parent="Tree_25_-20"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-mesh = SubResource("CylinderMesh_trunk")
-
-[node name="Leaves" type="MeshInstance3D" parent="Tree_25_-20"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.5, 0)
-mesh = SubResource("SphereMesh_leaves")
-
-[node name="TrunkCollision" type="StaticBody3D" parent="Tree_25_-20"]
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Tree_25_-20/TrunkCollision"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-shape = SubResource("CylinderShape3D_trunk")
-
-[node name="Tree_-30_-25" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 0, -25)
-
-[node name="Trunk" type="MeshInstance3D" parent="Tree_-30_-25"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-mesh = SubResource("CylinderMesh_trunk")
-
-[node name="Leaves" type="MeshInstance3D" parent="Tree_-30_-25"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.5, 0)
-mesh = SubResource("SphereMesh_leaves")
-
-[node name="TrunkCollision" type="StaticBody3D" parent="Tree_-30_-25"]
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Tree_-30_-25/TrunkCollision"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-shape = SubResource("CylinderShape3D_trunk")
-
-[node name="Tree_0_40" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 40)
-
-[node name="Trunk" type="MeshInstance3D" parent="Tree_0_40"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-mesh = SubResource("CylinderMesh_trunk")
-
-[node name="Leaves" type="MeshInstance3D" parent="Tree_0_40"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.5, 0)
-mesh = SubResource("SphereMesh_leaves")
-
-[node name="TrunkCollision" type="StaticBody3D" parent="Tree_0_40"]
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Tree_0_40/TrunkCollision"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-shape = SubResource("CylinderShape3D_trunk")
-
-[node name="Tree_35_30" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 35, 0, 30)
-
-[node name="Trunk" type="MeshInstance3D" parent="Tree_35_30"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-mesh = SubResource("CylinderMesh_trunk")
-
-[node name="Leaves" type="MeshInstance3D" parent="Tree_35_30"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.5, 0)
-mesh = SubResource("SphereMesh_leaves")
-
-[node name="TrunkCollision" type="StaticBody3D" parent="Tree_35_30"]
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Tree_35_30/TrunkCollision"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-shape = SubResource("CylinderShape3D_trunk")
-
-[node name="Tree_-35_15" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -35, 0, 15)
-
-[node name="Trunk" type="MeshInstance3D" parent="Tree_-35_15"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-mesh = SubResource("CylinderMesh_trunk")
-
-[node name="Leaves" type="MeshInstance3D" parent="Tree_-35_15"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.5, 0)
-mesh = SubResource("SphereMesh_leaves")
-
-[node name="TrunkCollision" type="StaticBody3D" parent="Tree_-35_15"]
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Tree_-35_15/TrunkCollision"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-shape = SubResource("CylinderShape3D_trunk")
-
-[node name="Tree_18_-35" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 18, 0, -35)
-
-[node name="Trunk" type="MeshInstance3D" parent="Tree_18_-35"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-mesh = SubResource("CylinderMesh_trunk")
-
-[node name="Leaves" type="MeshInstance3D" parent="Tree_18_-35"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.5, 0)
-mesh = SubResource("SphereMesh_leaves")
-
-[node name="TrunkCollision" type="StaticBody3D" parent="Tree_18_-35"]
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Tree_18_-35/TrunkCollision"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-shape = SubResource("CylinderShape3D_trunk")
-
-[node name="Rock_-12_-6" type="StaticBody3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 0, -6)
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="Rock_-12_-6"]
-transform = Transform3D(1, 0, 0, 0, 0.8, 0, 0, 0, 1.2, 0, 0.4, 0)
-mesh = SubResource("BoxMesh_rock")
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Rock_-12_-6"]
-transform = Transform3D(1, 0, 0, 0, 0.8, 0, 0, 0, 1.2, 0, 0.4, 0)
-shape = SubResource("BoxShape3D_rock")
-
-[node name="Rock_22_-18" type="StaticBody3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 0, -18)
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="Rock_22_-18"]
-transform = Transform3D(2, 0, 0, 0, 1, 0, 0, 0, 1.5, 0, 0.5, 0)
-mesh = SubResource("BoxMesh_rock")
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Rock_22_-18"]
-transform = Transform3D(2, 0, 0, 0, 1, 0, 0, 0, 1.5, 0, 0.5, 0)
-shape = SubResource("BoxShape3D_rock")
-
-[node name="Rock_-28_12" type="StaticBody3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -28, 0, 12)
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="Rock_-28_12"]
-transform = Transform3D(1.5, 0, 0, 0, 1.5, 0, 0, 0, 1.5, 0, 0.75, 0)
-mesh = SubResource("BoxMesh_rock")
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Rock_-28_12"]
-transform = Transform3D(1.5, 0, 0, 0, 1.5, 0, 0, 0, 1.5, 0, 0.75, 0)
-shape = SubResource("BoxShape3D_rock")
-
-[node name="Rock_33_28" type="StaticBody3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 33, 0, 28)
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="Rock_33_28"]
-transform = Transform3D(0.8, 0, 0, 0, 0.6, 0, 0, 0, 0.8, 0, 0.3, 0)
-mesh = SubResource("BoxMesh_rock")
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Rock_33_28"]
-transform = Transform3D(0.8, 0, 0, 0, 0.6, 0, 0, 0, 0.8, 0, 0.3, 0)
-shape = SubResource("BoxShape3D_rock")
-
-[node name="Rock_8_-22" type="StaticBody3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 0, -22)
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="Rock_8_-22"]
-transform = Transform3D(2.5, 0, 0, 0, 1.2, 0, 0, 0, 2, 0, 0.6, 0)
-mesh = SubResource("BoxMesh_rock")
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Rock_8_-22"]
-transform = Transform3D(2.5, 0, 0, 0, 1.2, 0, 0, 0, 2, 0, 0.6, 0)
-shape = SubResource("BoxShape3D_rock")
-
-[node name="Rock_-5_38" type="StaticBody3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0, 38)
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="Rock_-5_38"]
-transform = Transform3D(1, 0, 0, 0, 0.8, 0, 0, 0, 1, 0, 0.4, 0)
-mesh = SubResource("BoxMesh_rock")
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Rock_-5_38"]
-transform = Transform3D(1, 0, 0, 0, 0.8, 0, 0, 0, 1, 0, 0.4, 0)
-shape = SubResource("BoxShape3D_rock")
-
-[node name="Rock_15_8" type="StaticBody3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 15, 0, 8)
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="Rock_15_8"]
-transform = Transform3D(1.8, 0, 0, 0, 0.9, 0, 0, 0, 1.3, 0, 0.45, 0)
-mesh = SubResource("BoxMesh_rock")
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Rock_15_8"]
-transform = Transform3D(1.8, 0, 0, 0, 0.9, 0, 0, 0, 1.3, 0, 0.45, 0)
-shape = SubResource("BoxShape3D_rock")
+directional_shadow_mode = 1
+directional_shadow_max_distance = 60.0
+directional_shadow_split_1 = 0.25
+directional_shadow_blend_splits = true
+
+[node name="Terrain" type="MeshInstance3D" parent="."]
+mesh = SubResource("PlaneMesh_terrain")
+custom_aabb = AABB(-100, -10, -100, 200, 32, 200)
+
+[node name="Water" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1.5, 0)
+mesh = SubResource("PlaneMesh_water")
+custom_aabb = AABB(-100, -1.5, -100, 200, 3, 200)
+
+[node name="WorldGenerator" type="Node3D" parent="."]
+script = ExtResource("7")
+
+[node name="TimeManager" type="Node" parent="."]
+script = ExtResource("6")
 
 [node name="Player" parent="." instance=ExtResource("2")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)

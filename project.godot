@@ -46,7 +46,21 @@ jump={
 "events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":32,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
 ]
 }
+sprint={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":4194325,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
+]
+}
 
 [rendering]
 
 renderer/rendering_method="forward_plus"
+; --- 2 GB VRAM budget: these are guards, not preferences -------------------
+; MSAA 2x. 2 (4x) and 3 (8x) are banned by the project budget; scripts/main.gd
+; fails loudly at startup if this is raised.
+anti_aliasing/quality/msaa_3d=1
+; SSAO at Low. Radius/intensity live on the Environment in scenes/main.tscn.
+environment/ssao/quality=1
+; Two shadow splits at max_distance 60 do not need a 4096 atlas; 2048 halves the
+; largest single VRAM allocation in the scene (~64 MB -> ~16 MB).
+lights_and_shadows/directional_shadow/size=2048
