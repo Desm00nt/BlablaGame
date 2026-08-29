@@ -1,22 +1,34 @@
 extends Node3D
 
-## Scene root. Owns nothing but the performance-budget guard.
+## Scene root. Owns the performance-budget guard and spawns the interactive
+## world items (the sword pickup and the enemies) at their exact terrain
+## heights, which only TerrainNoise knows at runtime.
 ##
 ## The 2 GB VRAM ceiling is a hard project constraint, so instead of trusting
 ## that nobody will tick a box in the editor, the constraint is checked at
-## startup and reported. Anything banned shows up in the output log on the very
-## first frame - including in the CI export, where stdout is captured.
+## startup and reported.
 
 const MAX_MULTIMESH_INSTANCES: int = 3000
 const MAX_MSAA_3D: int = 1  # 0 = disabled, 1 = 2x. 2 (4x) and above are banned.
 
+## Enemy camp positions (XZ). Heights come from TerrainNoise at spawn time.
+## All points start far enough from the origin that the spawn plateau is a
+## safe zone, but close enough that a walk reaches them.
+const ENEMY_SPAWNS: Array[Vector2] = [
+	Vector2(10.0, 11.0),
+	Vector2(-13.0, 8.0),
+	Vector2(17.0, -10.0),
+	Vector2(-10.0, -17.0),
+	Vector2(25.0, 19.0),
+	Vector2(-23.0, -9.0),
+]
+
+const SWORD_SPAWN: Vector2 = Vector2(2.6, 4.5)
+
 @onready var world_env: WorldEnvironment = $WorldEnvironment
 @onready var sun: DirectionalLight3D = $DirectionalLight3D
 
-## On-screen diagnostics. An exported release build may not open a console
-## window at all, and "the character will not move" cannot be debugged from a
-## screenshot, so the state that decides it is drawn over the game instead.
-var _hud: Label
+var _hud: GameHUD
 var _instance_count: int = 0
 
 
@@ -40,63 +52,30 @@ func _ready() -> void:
 				world_env.environment.glow_enabled])
 	if violations.is_empty():
 		print("[Main] performance budget OK")
-	_build_hud()
+
+	_spawn_world_items()
+
+	_hud = GameHUD.new()
+	_hud.name = "HUD"
+	add_child(_hud)
+	_hud.setup(get_node(^"Player") as Player, _instance_count)
 
 
-## Builds the overlay in code rather than in main.tscn on purpose: it has to work
-## even when the node it is diagnosing failed to load.
-func _build_hud() -> void:
-	var layer := CanvasLayer.new()
-	layer.name = "DebugHUD"
-	layer.layer = 100
-	add_child(layer)
-	_hud = Label.new()
-	_hud.name = "DebugLabel"
-	_hud.position = Vector2(12, 12)
-	_hud.add_theme_color_override("font_color", Color(1.0, 1.0, 0.4))
-	_hud.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0))
-	_hud.add_theme_constant_override("outline_size", 4)
-	layer.add_child(_hud)
+## Spawns the sword pickup and the enemies on the actual displaced surface.
+func _spawn_world_items() -> void:
+	var sword_scene: PackedScene = preload("res://scenes/sword.tscn")
+	var sword := sword_scene.instantiate() as SwordItem
+	sword.position = Vector3(SWORD_SPAWN.x, TerrainNoise.terrain_height(SWORD_SPAWN) + 0.55,
+			SWORD_SPAWN.y)
+	add_child(sword)
 
-
-func _process(_delta: float) -> void:
-	if _hud != null:
-		_hud.text = _status_text()
-
-
-## Each line rules out one reason the character might not move.
-func _status_text() -> String:
-	var lines: PackedStringArray = []
-	lines.append("fps %.0f | multimesh %d" % [Engine.get_frames_per_second(), _instance_count])
-
-	var player := get_node_or_null(^"Player")
-	if player == null:
-		lines.append("PLAYER: MISSING - player.tscn did not instantiate")
-	else:
-		var has_script := "no"
-		if player.get_script() != null:
-			has_script = "yes"
-		lines.append("player: %s, script attached: %s" % [player.get_class(), has_script])
-		var body := player as CharacterBody3D
-		if body == null:
-			lines.append("player is NOT a CharacterBody3D - it cannot move")
-		else:
-			lines.append("pos %s" % body.position)
-			lines.append("vel %s on_floor %s" % [body.velocity, body.is_on_floor()])
-
-	var cam := get_viewport().get_camera_3d()
-	if cam == null:
-		lines.append("camera: NONE current")
-	else:
-		lines.append("camera: %s at %s" % [cam.name, cam.global_position])
-
-	lines.append("mouse mode %d (2 = captured)" % Input.mouse_mode)
-	var terrain := get_node_or_null(^"TerrainBody")
-	var terrain_state := "found"
-	if terrain == null:
-		terrain_state = "MISSING - nothing to stand on"
-	lines.append("terrain body: %s" % terrain_state)
-	return "\n".join(lines)
+	var enemy_scene: PackedScene = preload("res://scenes/enemy.tscn")
+	for p: Vector2 in ENEMY_SPAWNS:
+		var e := enemy_scene.instantiate() as Enemy
+		e.position = Vector3(p.x, TerrainNoise.terrain_height(p) + 0.1, p.y)
+		e.name = "Enemy_%d_%d" % [int(p.x), int(p.y)]
+		add_child(e)
+	print("[Main] spawned 1 sword + %d enemies" % ENEMY_SPAWNS.size())
 
 
 func _check_environment() -> PackedStringArray:
@@ -107,9 +86,8 @@ func _check_environment() -> PackedStringArray:
 		return bad
 	if env.sdfgi_enabled:
 		bad.append("SDFGI is enabled (banned)")
-	# Godot 4 renamed this: ss_reflections_enabled (3.x) -> ssr_enabled.
-	# Accessing the old name is a runtime error that would abort _ready()
-	# and kill the HUD diagnostics.
+		# Godot 4 renamed this: ss_reflections_enabled (3.x) -> ssr_enabled.
+		# Accessing the old name is a runtime error that would abort _ready().
 	if env.ssr_enabled:
 		bad.append("SSR is enabled (banned)")
 	if env.volumetric_fog_enabled:
@@ -133,9 +111,8 @@ func _count_multimesh_instances() -> int:
 	var stack: Array[Node] = [self]
 	while not stack.is_empty():
 		# Array.pop_back() returns Variant; `var n := ...` would infer
-		# Variant, and `Variant as T` stays Variant - which is a hard
-		# parse error in Godot 4.3 and would silently kill this whole
-		# script (and the on-screen diagnostics with it).
+		# Variant, and `Variant as T` stays Variant - a hard parse error in
+		# Godot 4.3. Type the variable explicitly.
 		var n: Node = stack.pop_back()
 		if n is MultiMeshInstance3D:
 			var mm := (n as MultiMeshInstance3D).multimesh

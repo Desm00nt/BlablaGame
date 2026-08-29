@@ -38,6 +38,7 @@ var rng := RandomNumberGenerator.new()
 var _total_instances: int = 0
 var _chunks: int = 0
 var _collision_faces: int = 0
+var _tree_colliders: int = 0
 
 
 func _ready() -> void:
@@ -117,6 +118,28 @@ func _build_terrain_collision() -> void:
 	# tick can move the player.
 	get_parent().add_child.call_deferred(body)
 	_collision_faces = faces.size() / 3
+
+
+## One StaticBody3D holding a cylinder per trunk. WorldGenerator is already
+## inside the tree by the time this runs (only its PARENT is still setting
+## up), so a plain add_child on self is safe here.
+func _build_tree_collision(positions: Array[Vector3], radii: Array) -> void:
+	if positions.is_empty():
+		return
+	var body := StaticBody3D.new()
+	body.name = "TreesBody"
+	body.collision_layer = 1
+	body.collision_mask = 0
+	for i in positions.size():
+		var col := CollisionShape3D.new()
+		var cyl := CylinderShape3D.new()
+		cyl.radius = float(radii[i])
+		cyl.height = 3.0
+		col.shape = cyl
+		col.position = Vector3(positions[i].x, positions[i].y + 1.5, positions[i].z)
+		body.add_child(col)
+	add_child(body)
+	_tree_colliders = positions.size()
 
 
 # --- prop meshes -------------------------------------------------------------
@@ -354,7 +377,9 @@ func _scatter(count: int, min_water_clearance: float, max_height: float, max_slo
 
 
 func _add_multimesh(mesh: Mesh, spots: Array, visibility_end: float, cast_shadows: bool,
-		min_scale: float, max_scale: float, tint_spread: float, base_name: String) -> void:
+			min_scale: float, max_scale: float, tint_spread: float, base_name: String,
+			collision_out_pos: Array,
+			collision_out_rad: Array) -> void:
 	if spots.is_empty():
 		return
 	# visibility_range_* is measured against the node's AABB, not per instance.
@@ -371,11 +396,14 @@ func _add_multimesh(mesh: Mesh, spots: Array, visibility_end: float, cast_shadow
 		buckets[key].append(p)
 	for key in buckets:
 		_create_chunk(mesh, buckets[key], visibility_end, cast_shadows,
-				min_scale, max_scale, tint_spread, "%s_%d_%d" % [base_name, key.x, key.y])
+				min_scale, max_scale, tint_spread, "%s_%d_%d" % [base_name, key.x, key.y],
+					collision_out_pos, collision_out_rad)
 
 
 func _create_chunk(mesh: Mesh, spots: Array, visibility_end: float, cast_shadows: bool,
-		min_scale: float, max_scale: float, tint_spread: float, node_name: String) -> void:
+			min_scale: float, max_scale: float, tint_spread: float, node_name: String,
+			collision_out_pos: Array,
+			collision_out_rad: Array) -> void:
 	if _total_instances + spots.size() > MAX_MULTIMESH_INSTANCES:
 		push_error("[WorldGenerator] instance budget exceeded at %s (%d + %d > %d)"
 				% [node_name, _total_instances, spots.size(), MAX_MULTIMESH_INSTANCES])
@@ -397,6 +425,11 @@ func _create_chunk(mesh: Mesh, spots: Array, visibility_end: float, cast_shadows
 		mm.set_instance_transform(i, Transform3D(rot * Basis.from_scale(scl), pos - Vector3(0.0, sink, 0.0)))
 		var v := rng.randf_range(1.0 - tint_spread, 1.0 + tint_spread)
 		mm.set_instance_color(i, Color(v, v, v))
+		if collision_out_pos != null and collision_out_rad != null:
+			# Trunk collider uses the exact same placement as the visual
+			# instance, so the hitbox never disagrees with the picture.
+			collision_out_pos.append(pos - Vector3(0.0, sink, 0.0))
+			collision_out_rad.append(clampf(0.34 * maxf(scl.x, scl.z), 0.2, 0.5))
 
 	var mmi := MultiMeshInstance3D.new()
 	mmi.name = node_name
@@ -417,14 +450,14 @@ func _create_chunk(mesh: Mesh, spots: Array, visibility_end: float, cast_shadows
 func _build_grass() -> void:
 	var spots := _scatter(grass_count, 0.4, TerrainNoise.GRASS_LINE, 0.35)
 	_add_multimesh(_make_tuft_mesh(Color(0, 0, 0, 0)), spots, visibility_end_grass, false,
-			0.75, 1.35, 0.16, "Grass")
+			0.75, 1.35, 0.16, "Grass", [], [])
 
 
 func _build_flowers() -> void:
 	for c in FLOWER_COLORS.size():
 		var spots := _scatter(flower_count_per_color, 0.7, 6.0, 0.22)
 		_add_multimesh(_make_tuft_mesh(FLOWER_COLORS[c]), spots, visibility_end_grass, false,
-				0.80, 1.20, 0.10, "Flowers_%d" % c)
+				0.80, 1.20, 0.10, "Flowers_%d" % c, [], [])
 
 
 func _build_trees() -> void:
@@ -432,15 +465,20 @@ func _build_trees() -> void:
 	var conifer_mat := _make_solid_material(Color(0.11, 0.26, 0.13), 0.88)
 	var broad_mat := _make_solid_material(Color(0.19, 0.38, 0.15), 0.85)
 	var half := tree_count / 2
+	# Both builders append into the same collision arrays, so all trunks end
+	# up in ONE StaticBody3D - 50 shapes, not 50 bodies.
+	var trunk_pos: Array[Vector3] = []
+	var trunk_rad: Array = []
 	_add_multimesh(_make_conifer_mesh(trunk_mat, conifer_mat),
 			_scatter(half, 1.0, TerrainNoise.ROCK_LINE, 0.40), visibility_end_props, true,
-			0.75, 1.35, 0.14, "TreesConifer")
+			0.75, 1.35, 0.14, "TreesConifer", trunk_pos, trunk_rad)
 	_add_multimesh(_make_broadleaf_mesh(trunk_mat, broad_mat),
 			_scatter(tree_count - half, 1.0, TerrainNoise.ROCK_LINE, 0.40), visibility_end_props, true,
-			0.75, 1.30, 0.18, "TreesBroadleaf")
+			0.75, 1.30, 0.18, "TreesBroadleaf", trunk_pos, trunk_rad)
+	_build_tree_collision(trunk_pos, trunk_rad)
 
 
 func _build_rocks() -> void:
 	_add_multimesh(_make_rock_mesh(_make_solid_material(Color(0.44, 0.43, 0.42), 0.96)),
 			_scatter(rock_count, 0.3, 999.0, 2.0), visibility_end_props, true,
-			0.60, 2.20, 0.12, "Rocks")
+			0.60, 2.20, 0.12, "Rocks", [], [])

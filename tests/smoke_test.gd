@@ -38,6 +38,7 @@ func _process(_delta: float) -> void:
 	_check_player_rests_on_terrain()
 	_check_time_and_sun()
 	_check_shaders_and_environment()
+	_check_gameplay_nodes()
 	print("")
 	if _failures == 0:
 		print("[Smoke] PASS")
@@ -204,3 +205,45 @@ func _check_shaders_and_environment() -> void:
 			mat = prim.material as ShaderMaterial
 		var ok: bool = mat != null and mat.get_shader_parameter(pair[1]) != null
 		_expect(ok, "%s shader material parsed and exposes %s" % [pair[0], pair[1]])
+
+
+func _check_gameplay_nodes() -> void:
+	print("[Smoke] gameplay: trees, sword, enemies, rig")
+	var main := $Main
+	var trees := main.get_node_or_null(NodePath("WorldGenerator/TreesBody")) as StaticBody3D
+	_expect(trees != null, "TreesBody exists under WorldGenerator")
+	if trees != null:
+		var shapes := 0
+		for c in trees.get_children():
+			if c is CollisionShape3D:
+				shapes += 1
+		_expect(shapes >= 40, "tree trunk colliders present (%d)" % shapes)
+	var sword := main.get_node_or_null(NodePath("Sword")) as SwordItem
+	_expect(sword != null and not sword.picked, "world sword spawned and unpicked")
+	var enemy_count := 0
+	var first_enemy: Enemy = null
+	for n in main.get_children():
+		if n is Enemy:
+			enemy_count += 1
+			if first_enemy == null:
+				first_enemy = n as Enemy
+	_expect(enemy_count >= 3, "enemies spawned (%d)" % enemy_count)
+	if first_enemy != null:
+		var hp0 := first_enemy.hp
+		first_enemy.take_damage(10.0, first_enemy.global_position + Vector3(1.0, 0.0, 0.0))
+		_expect(absf(first_enemy.hp - (hp0 - 10.0)) < 0.001, "enemy takes damage")
+		first_enemy.take_damage(9999.0, first_enemy.global_position)
+		_expect(first_enemy._state == Enemy.State.DEAD, "enemy dies on lethal damage")
+	var player := main.get_node_or_null(^"Player") as Player
+	_expect(player != null, "Player exists")
+	if player != null:
+		_expect(player.get_node_or_null(^"Rig") is CharacterRig,
+				"player has the procedural rig (no capsule mesh)")
+		if sword != null:
+			sword.try_pick_up(player)
+			_expect(player.has_sword, "sword pickup registers in the inventory")
+			player.toggle_equip()
+			_expect(player.sword_equipped and player.hand_sword.visible,
+					"equipping shows the sword in hand")
+			player.toggle_equip()
+			_expect(not player.sword_equipped, "unequipping hides the sword")
