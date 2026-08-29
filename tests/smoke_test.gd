@@ -1,7 +1,7 @@
 extends Node
 
 ## Headless smoke test. Loads the real main.tscn, lets physics run, then asserts
-## that the world was actually built.
+## that the world was actually built - and that the story layer works.
 ##
 ## Run:  godot --headless --quit-after 240 res://tests/smoke.tscn
 ##
@@ -12,11 +12,16 @@ extends Node
 ##   * the player falls and is stopped by that collision (not by a box at y=0)
 ##   * _basis_for_sun() produces an orthonormal basis matching sun_direction()
 ##   * each shader parsed far enough to expose its uniforms
+##   * the intro cutscene can be skipped and starts the first quest
+##   * the campfire echo advances the quest instantly
+##   * the Ingvar dialogue completes the quest and starts the barrow chain
+##   * barrow draugr spawn, die and tick the kill counter
 ##
 ## What it does NOT cover: shader compilation. --headless uses the dummy
 ## renderer, so GLSL is parsed but never compiled to SPIR-V.
 
 const CHECK_FRAME: int = 120
+const SKIP_CUTSCENE_FRAME: int = 25
 const EXPECTED_INSTANCES: int = 2081
 const INSTANCE_CEILING: int = 3000
 
@@ -30,6 +35,13 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	_frame += 1
+	if _frame == SKIP_CUTSCENE_FRAME:
+		# Deterministic intro: skip the cinematic so the story checks below
+		# see a settled state.
+		var cutscene := $Main.get_node_or_null(^"Cutscene") as CutscenePlayer
+		if cutscene != null:
+			cutscene.skip()
+		return
 	if _frame < CHECK_FRAME:
 		return
 	set_process(false)
@@ -39,6 +51,7 @@ func _process(_delta: float) -> void:
 	_check_time_and_sun()
 	_check_shaders_and_environment()
 	_check_gameplay_nodes()
+	_check_story()
 	print("")
 	if _failures == 0:
 		print("[Smoke] PASS")
@@ -239,11 +252,80 @@ func _check_gameplay_nodes() -> void:
 	if player != null:
 		_expect(player.get_node_or_null(^"Rig") is CharacterRig,
 				"player has the procedural rig (no capsule mesh)")
+		_expect(CharacterRig.EYE_Z < 0.0, "rig faces -Z (eyes on the forward side)")
 		if sword != null:
 			sword.try_pick_up(player)
 			_expect(player.has_sword, "sword pickup registers in the inventory")
+			_expect(player.has_item("steel_sword"), "sword lands in the inventory list")
 			player.toggle_equip()
 			_expect(player.sword_equipped and player.hand_sword.visible,
 					"equipping shows the sword in hand")
 			player.toggle_equip()
 			_expect(not player.sword_equipped, "unequipping hides the sword")
+			# First person: the body hides, the camera viewmodel shows instead.
+			player.camera_distance = 0.0
+			player.toggle_equip()
+			player._update_camera()
+			var body_rig := player.get_node_or_null(^"Rig") as Node3D
+			var fpn := player.get_node_or_null(^"CameraPivot/Camera3D/FPWeapon") as Node3D
+			_expect(body_rig != null and not body_rig.visible, "first person hides the body rig")
+			_expect(fpn != null, "FP viewmodel exists under the camera")
+			_expect(fpn != null and fpn.visible, "equipped sword is visible in first person")
+			player.camera_distance = 4.2
+			player._update_camera()
+			player.toggle_equip()
+
+
+func _check_story() -> void:
+	print("[Smoke] story: quest manager, landmarks, echo, dialogue")
+	var main := $Main
+	var qm := main.get_node_or_null(^"QuestManager") as QuestManager
+	_expect(qm != null, "QuestManager exists")
+	var player := main.get_node_or_null(^"Player") as Player
+	var cutscene := main.get_node_or_null(^"Cutscene")
+	_expect(cutscene != null, "Cutscene node exists")
+	if qm == null or player == null:
+		return
+	_expect(ItemDB.ITEMS.size() >= 3, "item database has the Act I items")
+	_expect(qm.is_active("ash"), "intro finished and quest 'Пепел' started")
+
+	var camp := main.get_node_or_null(NodePath("Camp")) as Landmark
+	var village := main.get_node_or_null(NodePath("Village")) as Landmark
+	var barrow := main.get_node_or_null(NodePath("Barrow")) as Landmark
+	_expect(camp != null, "camp landmark spawned")
+	_expect(village != null and village.npc != null, "village spawned with Ingvar")
+	_expect(barrow != null and barrow.echo_point != null, "barrow spawned with the echo stone")
+
+	# The campfire echo, played instantly, advances 'Пепел' to stage 1.
+	if camp != null and camp.echo_point != null:
+		_expect(camp.echo_point.quest_id == "ash", "campfire echo is wired to the first quest")
+		camp.echo_point.interact_instant(player)
+		_expect(qm.is_active("ash") and qm.active_stage == 1,
+				"campfire echo advanced 'Пепел' to the road stage")
+
+	# Dialogue with Ingvar: completes 'Пепел', starts 'Голос в кургане'.
+	var dialogue := main.get_node_or_null(NodePath("DialogueUI")) as DialogueUI
+	if dialogue != null:
+		_expect(village != null and village.npc.current_dialogue() == "ingvar_1",
+				"Ingvar offers the first dialogue while 'Пепел' is active")
+		dialogue.open("ingvar_1")
+		_expect(dialogue.is_open(), "dialogue opens")
+		dialogue.finish_instant()
+		_expect(not dialogue.is_open(), "dialogue closes")
+	_expect(qm.completed.has("ash"), "'Пепел' completed through the dialogue")
+	_expect(qm.is_active("barrow"), "'Голос в кургане' started")
+
+	# Barrow guards: spawned by the quest, counted by dying.
+	var barrow_draugrs: Array[Enemy] = []
+	for n in main.get_children():
+		if n is Enemy and (n as Enemy).kill_tag == "barrow_draugr":
+			barrow_draugrs.append(n as Enemy)
+	_expect(barrow_draugrs.size() == 3, "3 draugr guard the barrow (%d)" % barrow_draugrs.size())
+	if barrow_draugrs.size() > 0:
+		var victim := barrow_draugrs[0]
+		victim.take_damage(9999.0, victim.global_position)
+		_expect(qm.counter_progress() == "(1/3)", "kill counter reads (1/3)")
+	_expect(player.add_item("ashen_shard"), "shard can enter the inventory")
+	_expect(player.has_item("ashen_shard"), "shard stays in the inventory")
+	_expect(qm.get_marker(StoryData.MARKER_VILLAGE) != Vector3.INF,
+			"compass markers registered")

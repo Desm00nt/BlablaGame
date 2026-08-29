@@ -41,6 +41,8 @@ glow_enabled = true
 glow_intensity = 0.3
 glow_bloom = 0.1
 glow_hdr_threshold = 0.9
+adjustment_enabled = true
+adjustment_saturation = 1.0
 fog_enabled = true
 fog_light_color = Color(0.7, 0.78, 0.88, 1)
 fog_density = 0.008
@@ -62,8 +64,8 @@ shader_parameter/snow_line = 16.0
 [sub_resource type="PlaneMesh" id="PlaneMesh_terrain"]
 material = SubResource("ShaderMaterial_terrain")
 size = Vector2(200, 200)
-subdivide_width = 64
-subdivide_depth = 64
+subdivide_width = 96
+subdivide_depth = 96
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_water"]
 render_priority = 0

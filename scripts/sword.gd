@@ -2,9 +2,10 @@ class_name SwordItem
 extends Node3D
 
 ## A steel sword lying in the world. It spins slowly, bobs and pulses so it
-## reads as an interactive item. The player picks it up with the interact
-## action; the same model builder is reused for the copy attached to the
-## player's hand, so the world item and the equipped weapon are identical.
+## reads as an interactive item. The player picks it up through the generic
+## interactable contract (get_prompt/interact); the same model builder is
+## reused for the copy attached to the player's hand and the first-person
+## viewmodel, so every sword in the game is identical.
 
 signal picked_up(by: Node)
 
@@ -19,6 +20,7 @@ var _area: Area3D
 
 func _ready() -> void:
 	add_to_group("sword_item")
+	add_to_group("interactable")
 	_base_y = position.y
 	_visual = build_sword_mesh()
 	_visual.position = Vector3(0.0, 0.12, 0.0)
@@ -58,6 +60,17 @@ func _physics_process(delta: float) -> void:
 	_visual.rotation.y = _t * 1.6
 	_visual.position.y = 0.12 + sin(_t * 2.2) * 0.06
 	_blade_mat.emission_energy_multiplier = 0.55 + 0.3 * sin(_t * 3.0)
+
+
+## Interactable contract (see Player._update_interact_prompt).
+func get_prompt() -> String:
+	if picked:
+		return ""
+	return "Подобрать: Стальной меч"
+
+
+func interact(by: Node) -> void:
+	try_pick_up(by)
 
 
 ## Returns true when the pickup happened. If the picker understands swords it

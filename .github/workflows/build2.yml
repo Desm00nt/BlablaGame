@@ -37,7 +37,7 @@ jobs:
         # --check-only actually compiles each script and fails the job.
         run: |
           set -e
-          for f in scripts/*.gd tests/smoke_test.gd; do
+          for f in scripts/*.gd scripts/*/*.gd tests/smoke_test.gd; do
             echo "checking $f"
             godot --headless --check-only --script "res://$f"
           done

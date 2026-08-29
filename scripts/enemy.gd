@@ -14,6 +14,11 @@ extends CharacterBody3D
 ## Damage/knockback enter through take_damage(). The billboard HP bar is only
 ## drawn once the enemy is wounded, and its basis is copied from the camera
 ## every 3rd frame instead of per-particle billboarding.
+##
+## Facing comes from the rig itself: CharacterRig looks along -Z, and the yaw
+## below steers -Z along the walk direction, so draugr run facing forward.
+
+signal died(tag: String)
 
 enum State { PATROL, CHASE, WINDUP, STRIKE_RECOVER, STAGGER, DEAD }
 
@@ -26,6 +31,9 @@ enum State { PATROL, CHASE, WINDUP, STRIKE_RECOVER, STAGGER, DEAD }
 @export var chase_speed: float = 3.3
 @export var gravity: float = 9.8
 @export var respawn_delay: float = 20.0
+## Quest kill-counter tag ("" = not counted). main.gd forwards died(tag)
+## into QuestManager.notify_kill().
+@export var kill_tag: String = ""
 
 const WINDUP_TIME: float = 0.45
 const RECOVER_TIME: float = 0.9
@@ -195,6 +203,7 @@ func _die() -> void:
 	set_deferred("collision_layer", 0)
 	set_deferred("collision_mask", 1)
 	_hp_bar.visible = false
+	died.emit(kill_tag)
 
 
 func _respawn() -> void:

@@ -1,14 +1,19 @@
 class_name CharacterRig
 extends Node3D
 
-## Procedural low-poly humanoid. The project builds every asset from
-## primitives (no textures, no imported models), so the character is a small
-## node tree of cheap meshes driven by sin() curves instead of an
-## AnimationPlayer.
+## Procedural humanoid. The project builds every asset from primitives (no
+## textures, no imported models), so the character is a small node tree of
+## cheap meshes driven by sin() curves instead of an AnimationPlayer.
 ##
-## Cost per rig: ~20 low-segment meshes (6-10 segments each) and a handful of
-## materials. Poses are pure maths, so they never desync from the actual
-## movement speed and cost no allocations.
+## Facing contract (the whole game relies on it): the rig LOOKS ALONG -Z,
+## Godot's forward. Eyes sit at -Z, the cape hangs at +Z. Movement code steers
+## -Z toward the walk direction (atan2(-d.x, -d.z)) and the third-person
+## camera looks along the player's -Z, so everyone runs facing where they go.
+##
+## Poly budget: ~24 low-poly meshes per rig. Segment counts were raised once
+## already (10-14 radial on the big parts) - still < 2k triangles per rig,
+## invisible in any frame budget, and the silhouettes read smooth instead of
+## crystal-faceted.
 ##
 ## Pose contract:
 ##   apply_pose(delta, move01, on_floor, attack_t)
@@ -16,6 +21,10 @@ extends Node3D
 ##     attack_t -1 = not attacking, otherwise 0..1 over the whole swing
 ##   set_dead(t01)  falls on the back, stays down
 ##   reset_pose()   restores the living pose (respawn)
+##   start_lying() / begin_wake()  intro cutscene: lying, then gets up
+##   ghost_alpha < 1 turns every material translucent for echo visions
+
+const EYE_Z: float = -0.145  # regression guard: the face must be on -Z
 
 @export var palette_tunic: Color = Color(0.22, 0.34, 0.58)
 @export var palette_armor: Color = Color(0.70, 0.74, 0.80)
@@ -24,6 +33,7 @@ extends Node3D
 @export var palette_cape: Color = Color(0.55, 0.16, 0.16)
 @export var palette_eyes: Color = Color(0.95, 0.85, 0.30)
 @export var eyes_emissive: bool = false
+@export var ghost_alpha: float = 1.0
 
 ## Where the equipped weapon is attached (right hand).
 var hand_right: Node3D
@@ -46,6 +56,8 @@ var _base_skin: Color
 var _phase: float = 0.0
 var _time: float = 0.0
 var _flash: float = 0.0
+var _wake_t: float = 0.0
+var _wake_active: bool = false
 
 const HIP_Y: float = 0.88
 
@@ -59,6 +71,13 @@ func _mat(color: Color, rough: float, metallic: float = 0.0) -> StandardMaterial
 	m.albedo_color = color
 	m.roughness = rough
 	m.metallic = metallic
+	if ghost_alpha < 1.0:
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.albedo_color.a = ghost_alpha
+		# A faint cold shimmer so ghosts read at night.
+		m.emission_enabled = true
+		m.emission = Color(0.45, 0.62, 0.95)
+		m.emission_energy_multiplier = 0.22
 	return m
 
 
@@ -101,43 +120,56 @@ func _build() -> void:
 
 	_hips = _pivot(self, "Hips", Vector3(0.0, HIP_Y, 0.0))
 
-	# Torso: chunky 6-sided tapered cylinder.
+	# Torso: tapered cylinder with a chest plate and a belt.
 	var torso := CylinderMesh.new()
 	torso.top_radius = 0.235
 	torso.bottom_radius = 0.185
 	torso.height = 0.62
-	torso.radial_segments = 6
-	torso.rings = 1
+	torso.radial_segments = 12
+	torso.rings = 2
 	_mesh(_hips, torso, _mat_tunic, Vector3(0.0, 0.31, 0.0))
+
+	var chest := CylinderMesh.new()
+	chest.top_radius = 0.20
+	chest.bottom_radius = 0.235
+	chest.height = 0.18
+	chest.radial_segments = 12
+	chest.rings = 1
+	_mesh(_hips, chest, mat_armor, Vector3(0.0, 0.50, 0.02))
 
 	var belt := CylinderMesh.new()
 	belt.top_radius = 0.20
 	belt.bottom_radius = 0.20
 	belt.height = 0.09
-	belt.radial_segments = 6
+	belt.radial_segments = 12
 	belt.rings = 1
 	_mesh(_hips, belt, mat_leather, Vector3(0.0, 0.045, 0.0))
 
-	# Cape hangs from a pivot at the shoulders so it can swing.
-	_cape = _pivot(_hips, "Cape", Vector3(0.0, 0.45, -0.16))
+	# Buckle: a small steel detail on the belt's -Z (front) side.
+	var buckle := BoxMesh.new()
+	buckle.size = Vector3(0.07, 0.05, 0.02)
+	_mesh(_hips, buckle, mat_armor, Vector3(0.0, 0.045, -0.20))
+
+	# Cape hangs from a pivot at the shoulders (+Z = back) so it can swing.
+	_cape = _pivot(_hips, "Cape", Vector3(0.0, 0.45, 0.16))
 	var cape_mesh := BoxMesh.new()
 	cape_mesh.size = Vector3(0.40, 0.72, 0.025)
 	_mesh(_cape, cape_mesh, mat_cape, Vector3(0.0, -0.36, 0.0))
 
-	# Head: skull + helmet + horns + eyes.
+	# Head: skull + helmet + horns + eyes, all looking down -Z.
 	_head = _pivot(_hips, "Head", Vector3(0.0, 0.78, 0.0))
 	var skull := SphereMesh.new()
 	skull.radius = 0.165
 	skull.height = 0.33
-	skull.radial_segments = 10
-	skull.rings = 6
+	skull.radial_segments = 14
+	skull.rings = 8
 	_mesh(_head, skull, _mat_skin, Vector3.ZERO)
 
 	var helm := CylinderMesh.new()
 	helm.top_radius = 0.175
 	helm.bottom_radius = 0.185
 	helm.height = 0.15
-	helm.radial_segments = 8
+	helm.radial_segments = 12
 	helm.rings = 1
 	_mesh(_head, helm, mat_armor, Vector3(0.0, 0.075, 0.0))
 
@@ -145,29 +177,29 @@ func _build() -> void:
 	horn.top_radius = 0.0
 	horn.bottom_radius = 0.045
 	horn.height = 0.16
-	horn.radial_segments = 6
+	horn.radial_segments = 8
 	_mesh(_head, horn, mat_armor, Vector3(-0.16, 0.16, 0.0), Vector3(0.0, 0.0, -30.0))
 	_mesh(_head, horn, mat_armor, Vector3(0.16, 0.16, 0.0), Vector3(0.0, 0.0, 30.0))
 
 	var eye := SphereMesh.new()
 	eye.radius = 0.021
 	eye.height = 0.042
-	eye.radial_segments = 6
-	eye.rings = 3
-	_mesh(_head, eye, mat_eyes, Vector3(-0.055, 0.01, 0.145), Vector3(), false)
-	_mesh(_head, eye, mat_eyes, Vector3(0.055, 0.01, 0.145), Vector3(), false)
+	eye.radial_segments = 8
+	eye.rings = 4
+	_mesh(_head, eye, mat_eyes, Vector3(-0.055, 0.01, EYE_Z), Vector3(), false)
+	_mesh(_head, eye, mat_eyes, Vector3(0.055, 0.01, EYE_Z), Vector3(), false)
 
 	# Arms: shoulder pad + hanging capsule; the right one carries the weapon.
 	var arm := CapsuleMesh.new()
 	arm.radius = 0.068
 	arm.height = 0.5
-	arm.radial_segments = 7
-	arm.rings = 2
+	arm.radial_segments = 10
+	arm.rings = 3
 	var pad := SphereMesh.new()
 	pad.radius = 0.085
 	pad.height = 0.17
-	pad.radial_segments = 8
-	pad.rings = 4
+	pad.radial_segments = 12
+	pad.rings = 6
 	_arm_l = _pivot(_hips, "ArmL", Vector3(-0.295, 0.52, 0.0))
 	_mesh(_arm_l, pad, mat_armor, Vector3.ZERO)
 	_mesh(_arm_l, arm, _mat_tunic, Vector3(0.0, -0.24, 0.0))
@@ -180,8 +212,8 @@ func _build() -> void:
 	var leg := CapsuleMesh.new()
 	leg.radius = 0.082
 	leg.height = 0.86
-	leg.radial_segments = 7
-	leg.rings = 2
+	leg.radial_segments = 10
+	leg.rings = 3
 	_leg_l = _pivot(_hips, "LegL", Vector3(-0.115, 0.0, 0.0))
 	_mesh(_leg_l, leg, mat_leather, Vector3(0.0, -0.44, 0.0))
 	_leg_r = _pivot(_hips, "LegR", Vector3(0.115, 0.0, 0.0))
@@ -197,6 +229,14 @@ func apply_pose(delta: float, move01: float, on_floor: bool, attack_t: float) ->
 		_mat_tunic.albedo_color = _base_tunic.lerp(wound, _flash)
 		_mat_skin.albedo_color = _base_skin.lerp(wound, _flash * 0.7)
 
+	# Intro wake-up: rise from the back over ~1.2 s once released.
+	if _wake_t > 0.0:
+		if _wake_active:
+			_wake_t = maxf(_wake_t - delta / 1.2, 0.0)
+		rotation.x = -lerpf(0.0, PI * 0.5, _wake_t)
+		if _wake_t > 0.0:
+			return
+
 	if move01 > 0.02 and on_floor:
 		_phase += delta * (4.0 + 7.0 * clampf(move01, 0.0, 1.4))
 	var swing := sin(_phase) * clampf(move01, 0.0, 1.0)
@@ -207,24 +247,28 @@ func apply_pose(delta: float, move01: float, on_floor: bool, attack_t: float) ->
 
 	_arm_l.rotation.x = -swing * 0.55 + air_tuck * 1.2
 	if attack_t < 0.0:
-		_arm_r.rotation.x = swing * 0.55 + air_tuck * 1.2
-		_arm_r.rotation.z = 0.0
+		# Weapon-ready idle: right arm slightly bent forward so the sword
+		# reads as carried, not glued to the hip.
+		_arm_r.rotation.x = swing * 0.55 + air_tuck * 1.2 - 0.18
+		_arm_r.rotation.z = 0.12
 	else:
 		_apply_attack(attack_t)
 
 	var bob := absf(swing) * 0.055 + sin(_time * 2.1) * 0.012
 	_hips.position.y = HIP_Y + bob
 	_hips.rotation.y = swing * 0.08
-	_cape.rotation.x = 0.12 + clampf(move01, 0.0, 1.0) * 0.85 + sin(_phase * 0.5) * 0.05 * move01
+	# Cape trails BEHIND (+Z). Negative x-rotation swings its bottom to +Z.
+	_cape.rotation.x = -(0.12 + clampf(move01, 0.0, 1.0) * 0.85 + sin(_phase * 0.5) * 0.05 * move01)
 	_head.rotation.x = -0.04 - clampf(move01, 0.0, 1.0) * 0.05
 
 
 ## Swing timeline: windup 0..0.30, slash 0.30..0.55, recover 0.55..1.
+## Facing -Z: the windup raises the arm up-forward, the slash chops down.
 func _apply_attack(t01: float) -> void:
 	if t01 < 0.30:
 		var k := smoothstep(0.0, 0.30, t01)
 		_arm_r.rotation.x = lerpf(0.0, 1.35, k)
-		_arm_r.rotation.z = lerpf(0.0, -0.35, k)
+		_arm_r.rotation.z = lerpf(0.12, -0.35, k)
 	elif t01 < 0.55:
 		var k := smoothstep(0.30, 0.55, t01)
 		_arm_r.rotation.x = lerpf(1.35, -1.75, k)
@@ -232,7 +276,7 @@ func _apply_attack(t01: float) -> void:
 	else:
 		var k := smoothstep(0.55, 1.0, t01)
 		_arm_r.rotation.x = lerpf(-1.75, 0.0, k)
-		_arm_r.rotation.z = lerpf(0.25, 0.0, k)
+		_arm_r.rotation.z = lerpf(0.25, 0.12, k)
 
 
 func flash_hurt() -> void:
@@ -241,13 +285,30 @@ func flash_hurt() -> void:
 
 ## Falls on the back around the feet pivot, then stays down.
 func set_dead(t01: float) -> void:
+	_wake_t = 0.0
+	_wake_active = false
 	rotation.x = -lerpf(0.0, PI * 0.5, clampf(t01, 0.0, 1.0))
 
 
 func reset_pose() -> void:
 	rotation.x = 0.0
 	_flash = 0.0
+	_wake_t = 0.0
+	_wake_active = false
 	_mat_tunic.albedo_color = _base_tunic
 	_mat_skin.albedo_color = _base_skin
 	_phase = 0.0
 	apply_pose(0.016, 0.0, true, -1.0)
+
+
+## Intro: freeze lying on the back until begin_wake() releases the rise.
+func start_lying() -> void:
+	_wake_t = 1.0
+	_wake_active = false
+	rotation.x = -PI * 0.5
+
+
+func begin_wake() -> void:
+	if _wake_t <= 0.0:
+		_wake_t = 1.0
+	_wake_active = true

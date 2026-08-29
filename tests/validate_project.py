@@ -304,8 +304,8 @@ def scene_contract():
           "main.tscn: directional_shadow_mode must be 1 (SHADOW_PARALLEL_2_SPLITS)")
     check(re.search(r"directional_shadow_max_distance = 60\.0\b", main),
           "main.tscn: directional_shadow_max_distance must be 60")
-    check("subdivide_width = 64" in main and "subdivide_depth = 64" in main,
-          "main.tscn: terrain subdivide must be 64x64")
+    check("subdivide_width = 96" in main and "subdivide_depth = 96" in main,
+          "main.tscn: terrain subdivide must be 96x96")
     check("subdivide_width = 32" in main and "subdivide_depth = 32" in main,
           "main.tscn: water subdivide must be 32x32")
     check(re.search(r"transform = Transform3D\(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1\.5, 0\)", main),
@@ -314,7 +314,7 @@ def scene_contract():
           "main.tscn: SSAO / glow / ACES tonemap not enabled")
     check("ssao_radius = 1.0" in main and "glow_intensity = 0.3" in main,
           "main.tscn: SSAO radius must be 1.0 and glow intensity 0.3")
-    print("[7] scene node names match script lookups; shadows 2 splits @60 m; subdivide 64/32")
+    print("[7] scene node names match script lookups; shadows 2 splits @60 m; subdivide 96/32")
 
 
 # ------------------------------------------- 7. assets / paths / input map
@@ -382,8 +382,7 @@ def gdscript_parse():
         print("[10] gdparse NOT FOUND - GDScript parsing SKIPPED "
               "(pip install \"gdtoolkit==4.*\")")
         return
-    files = [os.path.join("scripts", f) for f in sorted(os.listdir(os.path.join(ROOT, "scripts")))
-             if f.endswith(".gd")]
+    files = [str(f.relative_to(ROOT)) for f in sorted((ROOT / "scripts").rglob("*.gd"))]
     files.append("tests/smoke_test.gd")
     bad = 0
     for f in files:
