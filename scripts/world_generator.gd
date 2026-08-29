@@ -109,7 +109,13 @@ func _build_terrain_collision() -> void:
 	var body := StaticBody3D.new()
 	body.name = "TerrainBody"
 	body.add_child(col)
-	get_parent().add_child(body)
+	# WorldGenerator._ready() runs while the parent (Main) is still setting
+	# up its children, so a plain add_child() here is rejected with "Parent
+	# node is busy setting up children" and the terrain collision would
+	# silently never enter the tree - the player would fall through the
+	# world. Deferring runs it right after setup, before the first physics
+	# tick can move the player.
+	get_parent().add_child.call_deferred(body)
 	_collision_faces = faces.size() / 3
 
 

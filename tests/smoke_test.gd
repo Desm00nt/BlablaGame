@@ -92,7 +92,9 @@ func _check_multimesh_budget() -> void:
 	var no_range: int = 0
 	var stack: Array[Node] = [$Main]
 	while not stack.is_empty():
-		var n := stack.pop_back()
+		# pop_back() returns Variant; inferring with `:=` from a Variant
+		# (even through `as`) is a hard parse error in Godot 4.3.
+		var n: Node = stack.pop_back()
 		if n is MultiMeshInstance3D:
 			var mmi := n as MultiMeshInstance3D
 			nodes += 1
@@ -158,7 +160,12 @@ func _check_time_and_sun() -> void:
 	_expect(absf(b.determinant() - 1.0) < 0.001,
 			"sun basis determinant is +1 (got %0.4f)" % b.determinant())
 	var want: Vector3 = tm.sun_direction()
-	_expect(b.z.distance_to(want) < 0.001,
+	# The sun transform is refreshed at update_rate Hz (6 by default), while
+	# time_of_day keeps advancing, so the basis may lag up to 1/update_rate
+	# seconds behind. The sun moves TAU / day_length_seconds rad/s
+	# (~0.0035 rad per 1/6 s), so 0.005 absorbs the full lag plus float32
+	# noise without hiding a real error.
+	_expect(b.z.distance_to(want) < 0.005,
 			"light -Z points away from sun_direction() (delta %0.5f)" % b.z.distance_to(want))
 
 
@@ -171,7 +178,8 @@ func _check_shaders_and_environment() -> void:
 		return
 	var env := we.environment
 	_expect(not env.sdfgi_enabled, "SDFGI off")
-	_expect(not env.ss_reflections_enabled, "SSR off")
+	# Godot 4 renamed ss_reflections_enabled (3.x) to ssr_enabled.
+	_expect(not env.ssr_enabled, "SSR off")
 	_expect(not env.volumetric_fog_enabled, "Volumetric fog off")
 	_expect(env.ssao_enabled, "SSAO on")
 	_expect(env.glow_enabled, "Glow on")

@@ -107,7 +107,10 @@ func _check_environment() -> PackedStringArray:
 		return bad
 	if env.sdfgi_enabled:
 		bad.append("SDFGI is enabled (banned)")
-	if env.ss_reflections_enabled:
+	# Godot 4 renamed this: ss_reflections_enabled (3.x) -> ssr_enabled.
+	# Accessing the old name is a runtime error that would abort _ready()
+	# and kill the HUD diagnostics.
+	if env.ssr_enabled:
 		bad.append("SSR is enabled (banned)")
 	if env.volumetric_fog_enabled:
 		bad.append("Volumetric Fog is enabled (banned - use fog_enabled distance fog)")
@@ -129,7 +132,11 @@ func _count_multimesh_instances() -> int:
 	var total := 0
 	var stack: Array[Node] = [self]
 	while not stack.is_empty():
-		var n := stack.pop_back()
+		# Array.pop_back() returns Variant; `var n := ...` would infer
+		# Variant, and `Variant as T` stays Variant - which is a hard
+		# parse error in Godot 4.3 and would silently kill this whole
+		# script (and the on-screen diagnostics with it).
+		var n: Node = stack.pop_back()
 		if n is MultiMeshInstance3D:
 			var mm := (n as MultiMeshInstance3D).multimesh
 			if mm != null:

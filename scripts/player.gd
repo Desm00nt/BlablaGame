@@ -163,13 +163,19 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	# Mouse look only while the cursor is captured.
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		# `event.relative` on a plain InputEvent is a Variant access, and
+		# inferring a variable from a Variant with `:=` is a hard parse
+		# error in Godot 4.3 - the whole script then fails to load and the
+		# character becomes a frozen capsule (no gravity, no movement, no
+		# mouse look). Cast once so every property below is typed.
+		var motion := event as InputEventMouseMotion
 		# Horizontal mouse movement rotates the whole body (yaw).
-		var yaw := -event.relative.x * mouse_sensitivity
+		var yaw := -motion.relative.x * mouse_sensitivity
 		rotate_y(yaw)
 		_yaw_delta += yaw
 
 		# Vertical mouse movement rotates the camera pivot (pitch), clamped to +-70 degrees.
-		camera_pivot.rotate_x(-event.relative.y * mouse_sensitivity)
+		camera_pivot.rotate_x(-motion.relative.y * mouse_sensitivity)
 		camera_pivot.rotation.x = clamp(camera_pivot.rotation.x, deg_to_rad(-70.0), deg_to_rad(70.0))
 
 

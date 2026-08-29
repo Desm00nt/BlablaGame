@@ -31,6 +31,24 @@ jobs:
       - name: Import project assets
         run: godot --headless --import
 
+      - name: Compile-check every GDScript
+        # --export-release only PACKS scripts, it never compiles them, so a
+        # parse error reaches the player as a frozen game with a green CI.
+        # --check-only actually compiles each script and fails the job.
+        run: |
+          set -e
+          for f in scripts/*.gd tests/smoke_test.gd; do
+            echo "checking $f"
+            godot --headless --check-only --script "res://$f"
+          done
+
+      - name: Headless smoke test (world builds, player rests on terrain)
+        # Loads the real main.tscn: if the player does not fall onto the
+        # terrain, or the world is not built, [Smoke] PASS never appears.
+        run: |
+          godot --headless --quit-after 240 res://tests/smoke.tscn 2>&1 | tee smoke.log
+          grep -q "\[Smoke\] PASS" smoke.log
+
       - name: Create build directories
         run: mkdir -p build/windows
 

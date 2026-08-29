@@ -52,6 +52,12 @@ volumetric_fog_enabled = false
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_terrain"]
 render_priority = 0
 shader = ExtResource("3")
+; Band thresholds repeated from the shader defaults so the smoke test can
+; read them back and verify the material matches TerrainNoise's GRASS_LINE,
+; ROCK_LINE and SNOW_LINE. Values are identical to the shader defaults.
+shader_parameter/grass_line = 8.0
+shader_parameter/rock_line = 13.0
+shader_parameter/snow_line = 16.0
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_terrain"]
 material = SubResource("ShaderMaterial_terrain")
