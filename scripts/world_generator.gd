@@ -10,23 +10,25 @@ extends Node3D
 ## displaces the terrain to.
 ##
 ## HARD BUDGET (2 GB VRAM target):
-##   grass 1650 + flowers 3x117 + trees 50 + rocks 30 = 2081 MultiMesh
-##   instances, against a project ceiling of 3000. main.gd asserts this at
+##   grass 4200 + flowers 3x250 + trees 200 + rocks 100 = 5250 MultiMesh
+##   instances, against a project ceiling of 8000. main.gd asserts this at
 ##   startup, so raising the exports below without raising the ceiling fails
-##   loudly instead of silently.
+##   loudly instead of silently. The ceiling is 4x-area-scale, but instance
+##   buffers cost ~50 bytes each, so the real budget driver is draw calls -
+##   the 8x8 chunk grid keeps those cullable.
 
-const MAX_MULTIMESH_INSTANCES: int = 3000
+const MAX_MULTIMESH_INSTANCES: int = 8000
 
-@export var grass_count: int = 1650
-@export var flower_count_per_color: int = 117
-@export var tree_count: int = 50
-@export var rock_count: int = 30
+@export var grass_count: int = 4200
+@export var flower_count_per_color: int = 250
+@export var tree_count: int = 200
+@export var rock_count: int = 100
 @export var seed_value: int = 20260826
-@export var visibility_end_grass: float = 55.0
-@export var visibility_end_props: float = 80.0
-## Props are bucketed into chunk_grid x chunk_grid cells (50 m at 4) so that
+@export var visibility_end_grass: float = 60.0
+@export var visibility_end_props: float = 110.0
+## Props are bucketed into chunk_grid x chunk_grid cells (50 m at 8) so that
 ## visibility_range_end and frustum culling actually have something to work on.
-@export var chunk_grid: int = 4
+@export var chunk_grid: int = 8
 
 const FLOWER_COLORS: Array = [
 	Color(1.00, 0.82, 0.22),
@@ -356,9 +358,13 @@ func _make_solid_material(color: Color, roughness: float) -> StandardMaterial3D:
 # --- placement ---------------------------------------------------------------
 
 ## Rejection-samples valid spots. Returns world positions on the terrain.
-func _scatter(count: int, min_water_clearance: float, max_height: float, max_slope: float) -> Array:
+## keepout_dungeon clears the sunken courtyard and its apron; keepout_structures
+## additionally pushes trees/rocks off every landmark pad so nothing grows
+## through the camp, the village or the barrow.
+func _scatter(count: int, min_water_clearance: float, max_height: float, max_slope: float,
+		keepout_structures: bool = false, keepout_dungeon: bool = false) -> Array:
 	var out := []
-	var half := 95.0
+	var half := TerrainNoise.WORLD_HALF - 10.0
 	var attempts := count * 40
 	var guard := 0
 	while out.size() < count and guard < attempts:
@@ -369,6 +375,18 @@ func _scatter(count: int, min_water_clearance: float, max_height: float, max_slo
 			continue
 		if max_slope < 1.0 and TerrainNoise.slope_at(p) > max_slope:
 			continue
+		if keepout_dungeon:
+			var dc := TerrainNoise.PADS[TerrainNoise.DUNGEON_INDEX][0] as Vector2
+			if (p - dc).length() < 23.0:
+				continue
+		if keepout_structures:
+			var blocked := false
+			for pad in TerrainNoise.PADS:
+				if (p - (pad[0] as Vector2)).length() < float(pad[1]) + 2.0:
+					blocked = true
+					break
+			if blocked:
+				continue
 		out.append(Vector3(p.x, h, p.y))
 	if out.size() < count:
 		push_warning("[WorldGenerator] placed only %d/%d - terrain rules rejected too many samples"
@@ -383,13 +401,14 @@ func _add_multimesh(mesh: Mesh, spots: Array, visibility_end: float, cast_shadow
 	if spots.is_empty():
 		return
 	# visibility_range_* is measured against the node's AABB, not per instance.
-	# One MultiMesh spanning the whole 200 m world would therefore never be
+	# One MultiMesh spanning the whole 400 m world would therefore never be
 	# culled, so the spots are bucketed into chunk_grid x chunk_grid cells first.
-	var cell := 200.0 / float(maxi(chunk_grid, 1))
+	var span := TerrainNoise.WORLD_HALF * 2.0
+	var cell := span / float(maxi(chunk_grid, 1))
 	var buckets := {}
 	for p in spots:
-		var cx := clampi(int((p.x + 100.0) / cell), 0, chunk_grid - 1)
-		var cz := clampi(int((p.z + 100.0) / cell), 0, chunk_grid - 1)
+		var cx := clampi(int((p.x + TerrainNoise.WORLD_HALF) / cell), 0, chunk_grid - 1)
+		var cz := clampi(int((p.z + TerrainNoise.WORLD_HALF) / cell), 0, chunk_grid - 1)
 		var key := Vector2i(cx, cz)
 		if not buckets.has(key):
 			buckets[key] = []
@@ -448,14 +467,16 @@ func _create_chunk(mesh: Mesh, spots: Array, visibility_end: float, cast_shadows
 # --- builders ----------------------------------------------------------------
 
 func _build_grass() -> void:
-	var spots := _scatter(grass_count, 0.4, TerrainNoise.GRASS_LINE, 0.35)
+	var spots := _scatter(grass_count, 0.4, TerrainNoise.GRASS_LINE, 0.35,
+			false, true)
 	_add_multimesh(_make_tuft_mesh(Color(0, 0, 0, 0)), spots, visibility_end_grass, false,
 			0.75, 1.35, 0.16, "Grass", [], [])
 
 
 func _build_flowers() -> void:
 	for c in FLOWER_COLORS.size():
-		var spots := _scatter(flower_count_per_color, 0.7, 6.0, 0.22)
+		var spots := _scatter(flower_count_per_color, 0.7, 6.0, 0.22,
+				false, true)
 		_add_multimesh(_make_tuft_mesh(FLOWER_COLORS[c]), spots, visibility_end_grass, false,
 				0.80, 1.20, 0.10, "Flowers_%d" % c, [], [])
 
@@ -470,15 +491,15 @@ func _build_trees() -> void:
 	var trunk_pos: Array[Vector3] = []
 	var trunk_rad: Array = []
 	_add_multimesh(_make_conifer_mesh(trunk_mat, conifer_mat),
-			_scatter(half, 1.0, TerrainNoise.ROCK_LINE, 0.40), visibility_end_props, true,
+			_scatter(half, 1.0, TerrainNoise.ROCK_LINE, 0.40, true), visibility_end_props, true,
 			0.75, 1.35, 0.14, "TreesConifer", trunk_pos, trunk_rad)
 	_add_multimesh(_make_broadleaf_mesh(trunk_mat, broad_mat),
-			_scatter(tree_count - half, 1.0, TerrainNoise.ROCK_LINE, 0.40), visibility_end_props, true,
+			_scatter(tree_count - half, 1.0, TerrainNoise.ROCK_LINE, 0.40, true), visibility_end_props, true,
 			0.75, 1.30, 0.18, "TreesBroadleaf", trunk_pos, trunk_rad)
 	_build_tree_collision(trunk_pos, trunk_rad)
 
 
 func _build_rocks() -> void:
 	_add_multimesh(_make_rock_mesh(_make_solid_material(Color(0.44, 0.43, 0.42), 0.96)),
-			_scatter(rock_count, 0.3, 999.0, 2.0), visibility_end_props, true,
+			_scatter(rock_count, 0.3, 999.0, 2.0, true), visibility_end_props, true,
 			0.60, 2.20, 0.12, "Rocks", [], [])

@@ -4,15 +4,21 @@ extends CanvasLayer
 ## Intro cinematic for "Пепельная Корона", Act I.
 ##
 ## Timeline (all timings in seconds, driven by _process, no Tween nodes):
-##   0.0-12.5  black screen, five lore slides fading in/out
-##   12.5-15.0 fade from black; the camera hangs high over the wrecked camp
-##   15.0-21.0 slow descend toward the hero lying in the ashes, letterboxed
-##   21.0      the hero wakes, the hand symbol flares (HUD)
-##   21.0-26.0 title card "ПЕПЕЛЬНАЯ КОРОНА" + "Глава I · Пепел"
-##   26.0      finished - control returns to the player
+##   0.0-10.0  black screen, five lore slides fading in/out
+##   10.0-12.0 fade from black; the camera hangs high over the wrecked camp
+##   12.0-18.5 slow descend toward the hero lying in the ashes, letterboxed
+##   18.5      the hero wakes, the hand symbol flares (HUD)
+##   18.5-23.5 title card "ПЕПЕЛЬНАЯ КОРОНА" + "Глава I · Пепел"
+##   23.5      finished - control returns to the player
 ##
 ## Any key / mouse press skips to the end. The player camera is made current
 ## again in _finish().
+##
+## First-person safety: set_cutscene_mode(true) forces the hero's body rig
+## visible and hides the FP viewmodel, so the cinematic camera always sees a
+## character in the ashes even if the player had zoomed into first person.
+## Mouse motion during the cinematic pans the camera a few degrees around the
+## hero (free look), decaying back to the authored framing.
 
 signal finished
 
@@ -26,13 +32,16 @@ const SLIDES := [
 
 # Camera keyframes: [t, position]. Look target is always the hero's chest.
 const CAM_PATH := [
-	[12.5, Vector3(2.0, 13.0, -14.0)],
-	[16.0, Vector3(4.5, 6.0, -8.5)],
-	[21.0, Vector3(3.4, 1.7, -3.6)],
+	[10.0, Vector3(2.0, 13.0, -14.0)],
+	[13.5, Vector3(4.5, 6.0, -8.5)],
+	[18.5, Vector3(3.4, 1.7, -3.6)],
 ]
 
-const TITLE_AT: float = 21.0
-const END_AT: float = 26.0
+const SLIDES_END: float = 10.0
+const TITLE_AT: float = 18.5
+const END_AT: float = 23.5
+const FREELOOK_MAX_YAW: float = 0.5
+const FREELOOK_MAX_PITCH: float = 0.3
 
 var player: Player = null
 var hud: GameHUD = null
@@ -49,6 +58,8 @@ var _t: float = 0.0
 var _slide_idx: int = -1
 var _done: bool = false
 var _look_target: Vector3
+var _free_yaw: float = 0.0
+var _free_pitch: float = 0.0
 
 
 func _ready() -> void:
@@ -63,6 +74,8 @@ func start() -> void:
 	_build()
 	if player != null:
 		_look_target = player.global_position + Vector3(0.0, 0.9, 0.0)
+		# Force the hero visible for the cinematic (also covers first person).
+		player.set_cutscene_mode(true)
 	_cam = Camera3D.new()
 	_cam.fov = 58.0
 	get_parent().add_child(_cam)
@@ -148,6 +161,9 @@ func _process(delta: float) -> void:
 	if _done or not visible:
 		return
 	_t += delta
+	# Free look eases back to the authored framing when the mouse rests.
+	_free_yaw = move_toward(_free_yaw, 0.0, delta * 0.35)
+	_free_pitch = move_toward(_free_pitch, 0.0, delta * 0.35)
 	_update_slides()
 	_update_camera()
 	_update_letterbox()
@@ -158,19 +174,19 @@ func _process(delta: float) -> void:
 
 func _update_slides() -> void:
 	var slide_count := SLIDES.size()
-	var slide_len := 12.5 / float(slide_count)
+	var slide_len := SLIDES_END / float(slide_count)
 	var idx := clampi(int(_t / slide_len), 0, slide_count - 1)
 	if idx != _slide_idx:
 		_slide_idx = idx
 		_slide_label.text = str(SLIDES[idx])
-	if _t < 12.5:
+	if _t < SLIDES_END:
 		# Fade each slide in and out inside its slot.
 		var local := fmod(_t, slide_len)
 		_slide_label.modulate.a = clampf(minf(local / 0.7, (slide_len - local) / 0.7), 0.0, 1.0)
 		_black.color.a = 1.0
-	elif _t < 14.5:
+	elif _t < SLIDES_END + 2.0:
 		_slide_label.modulate.a = 0.0
-		_black.color.a = maxf(1.0 - (_t - 12.5) / 2.0, 0.0)
+		_black.color.a = maxf(1.0 - (_t - SLIDES_END) / 2.0, 0.0)
 	else:
 		_black.color.a = 0.0
 
@@ -195,14 +211,18 @@ func _update_camera() -> void:
 		var last: Vector3 = CAM_PATH[CAM_PATH.size() - 1][1]
 		_cam.global_position = last
 	_cam.look_at(_look_target, Vector3.UP)
+	# Free look: mouse pans the framing a few degrees around the hero.
+	if _free_yaw != 0.0 or _free_pitch != 0.0:
+		_cam.rotate_y(-_free_yaw)
+		_cam.rotate_x(_free_pitch)
 
 
 func _update_letterbox() -> void:
-	if _t < 12.5:
+	if _t < SLIDES_END:
 		_letterbox_top.offset_bottom = 0.0
 		_letterbox_bottom.offset_top = 0.0
 	else:
-		var k := clampf((_t - 12.5) / 1.2, 0.0, 1.0)
+		var k := clampf((_t - SLIDES_END) / 1.2, 0.0, 1.0)
 		_letterbox_top.offset_bottom = 54.0 * k
 		_letterbox_bottom.offset_top = -54.0 * k
 
@@ -245,6 +265,7 @@ func _finish() -> void:
 		_cam.queue_free()
 		_cam = null
 	if player != null:
+		player.set_cutscene_mode(false)
 		player.finish_intro()
 		player.camera.make_current()
 	finished.emit()
@@ -253,6 +274,13 @@ func _finish() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if _done or not visible:
 		return
+	var mm := event as InputEventMouseMotion
+	if mm != null:
+		# Free look during the cinematic: the hero stays framed, the camera
+		# swivels a few degrees and eases back over time.
+		_free_yaw = clampf(_free_yaw + mm.relative.x * 0.0012, -FREELOOK_MAX_YAW, FREELOOK_MAX_YAW)
+		_free_pitch = clampf(_free_pitch + mm.relative.y * 0.0012, -FREELOOK_MAX_PITCH, FREELOOK_MAX_PITCH)
+		return
 	var key := event as InputEventKey
 	if key != null and key.pressed and not key.echo:
 		skip()
@@ -260,9 +288,6 @@ func _unhandled_input(event: InputEvent) -> void:
 	var mb := event as InputEventMouseButton
 	if mb != null and mb.pressed:
 		skip()
-		return
-	var mm := event as InputEventMouseMotion
-	if mm != null:
 		return
 	if event.is_action_pressed("ui_accept"):
 		skip()

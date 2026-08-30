@@ -16,13 +16,18 @@ extends Node3D
 ## crystal-faceted.
 ##
 ## Pose contract:
-##   apply_pose(delta, move01, on_floor, attack_t)
+##   apply_pose(delta, move01, on_floor, attack_t, block_f)
 ##     move01   0 = idle, 1 = full run
 ##     attack_t -1 = not attacking, otherwise 0..1 over the whole swing
+##     block_f  0..1 shield-raise blend (0 = no block)
 ##   set_dead(t01)  falls on the back, stays down
 ##   reset_pose()   restores the living pose (respawn)
 ##   start_lying() / begin_wake()  intro cutscene: lying, then gets up
 ##   ghost_alpha < 1 turns every material translucent for echo visions
+##
+## The shield is optional: attach_shield() bolts it onto the left hand, and
+## every pose after that blends the left arm toward the guard stance by
+## block_f.
 
 const EYE_Z: float = -0.145  # regression guard: the face must be on -Z
 
@@ -35,8 +40,10 @@ const EYE_Z: float = -0.145  # regression guard: the face must be on -Z
 @export var eyes_emissive: bool = false
 @export var ghost_alpha: float = 1.0
 
-## Where the equipped weapon is attached (right hand).
+## Where the equipped weapon is attached (right hand), and the shield (left).
 var hand_right: Node3D
+var hand_left: Node3D
+var shield_mesh: Node3D = null
 
 var _hips: Node3D
 var _head: Node3D
@@ -203,6 +210,7 @@ func _build() -> void:
 	_arm_l = _pivot(_hips, "ArmL", Vector3(-0.295, 0.52, 0.0))
 	_mesh(_arm_l, pad, mat_armor, Vector3.ZERO)
 	_mesh(_arm_l, arm, _mat_tunic, Vector3(0.0, -0.24, 0.0))
+	hand_left = _pivot(_arm_l, "HandL", Vector3(0.0, -0.5, 0.0))
 	_arm_r = _pivot(_hips, "ArmR", Vector3(0.295, 0.52, 0.0))
 	_mesh(_arm_r, pad, mat_armor, Vector3.ZERO)
 	_mesh(_arm_r, arm, _mat_tunic, Vector3(0.0, -0.24, 0.0))
@@ -221,7 +229,8 @@ func _build() -> void:
 
 
 ## Called every physics frame by the owning body.
-func apply_pose(delta: float, move01: float, on_floor: bool, attack_t: float) -> void:
+func apply_pose(delta: float, move01: float, on_floor: bool, attack_t: float,
+		block_f: float = 0.0) -> void:
 	_time += delta
 	if _flash > 0.0:
 		_flash = maxf(_flash - delta * 4.0, 0.0)
@@ -246,9 +255,16 @@ func apply_pose(delta: float, move01: float, on_floor: bool, attack_t: float) ->
 	_leg_r.rotation.x = -swing * 0.75 + air_tuck * 0.6
 
 	_arm_l.rotation.x = -swing * 0.55 + air_tuck * 1.2
+	_arm_l.rotation.z = 0.0
+	# Shield guard: the left forearm sweeps up and across the chest, so the
+	# shield disk covers the body's front. block_f comes from the owner.
+	if block_f > 0.0:
+		_arm_l.rotation.x = lerpf(_arm_l.rotation.x, -1.1, block_f)
+		_arm_l.rotation.z = lerpf(_arm_l.rotation.z, 1.05, block_f)
 	if attack_t < 0.0:
 		# Weapon-ready idle: right arm slightly bent forward so the sword
-		# reads as carried, not glued to the hip.
+		# reads as carried, not glued to the hip. Blocking tucks it back
+		# a touch, ready to counter.
 		_arm_r.rotation.x = swing * 0.55 + air_tuck * 1.2 - 0.18
 		_arm_r.rotation.z = 0.12
 	else:
@@ -306,6 +322,57 @@ func start_lying() -> void:
 	_wake_t = 1.0
 	_wake_active = false
 	rotation.x = -PI * 0.5
+
+
+## Bolts a round oak-and-iron shield onto the left hand. The disk faces
+## forward (-Z): the cylinder axis is Z, so it guards the body's front.
+func attach_shield() -> void:
+	if shield_mesh != null:
+		return
+	shield_mesh = Node3D.new()
+	shield_mesh.name = "Shield"
+	var wood := StandardMaterial3D.new()
+	wood.albedo_color = Color(0.36, 0.26, 0.15)
+	wood.roughness = 0.9
+	var iron := StandardMaterial3D.new()
+	iron.albedo_color = Color(0.52, 0.53, 0.56)
+	iron.metallic = 0.65
+	iron.roughness = 0.4
+	var disk := CylinderMesh.new()
+	disk.top_radius = 0.29
+	disk.bottom_radius = 0.29
+	disk.height = 0.05
+	disk.radial_segments = 16
+	disk.rings = 1
+	var disk_mi := MeshInstance3D.new()
+	disk_mi.mesh = disk
+	disk_mi.material_override = wood
+	disk_mi.rotation_degrees = Vector3(90.0, 0.0, 0.0)
+	shield_mesh.add_child(disk_mi)
+	var rim := CylinderMesh.new()
+	rim.top_radius = 0.30
+	rim.bottom_radius = 0.30
+	rim.height = 0.035
+	rim.radial_segments = 16
+	rim.rings = 1
+	var rim_mi := MeshInstance3D.new()
+	rim_mi.mesh = rim
+	rim_mi.material_override = iron
+	rim_mi.rotation_degrees = Vector3(90.0, 0.0, 0.0)
+	shield_mesh.add_child(rim_mi)
+	var boss := SphereMesh.new()
+	boss.radius = 0.075
+	boss.height = 0.13
+	boss.radial_segments = 12
+	boss.rings = 6
+	var boss_mi := MeshInstance3D.new()
+	boss_mi.mesh = boss
+	boss_mi.material_override = iron
+	boss_mi.position = Vector3(0.0, 0.0, -0.05)
+	shield_mesh.add_child(boss_mi)
+	# Held slightly ahead of the fist, facing the enemy.
+	shield_mesh.position = Vector3(0.0, -0.04, -0.09)
+	hand_left.add_child(shield_mesh)
 
 
 func begin_wake() -> void:

@@ -20,6 +20,10 @@ var _time: float = 0.0
 var _hp_fill: ColorRect
 var _hp_label: Label
 var _st_fill: ColorRect
+# XP / gold row.
+var _xp_fill: ColorRect
+var _xp_label: Label
+var _gold_label: Label
 # Tracker.
 var _tracker: PanelContainer
 var _tracker_title: Label
@@ -32,6 +36,12 @@ var _hotbar_label: Label
 var _slot_normal: StyleBoxFlat
 var _slot_equipped: StyleBoxFlat
 var _slot_icon: ItemIcon
+var _shield_slot: PanelContainer
+var _shield_icon: ItemIcon
+var _shield_label: Label
+var _potion_slot: PanelContainer
+var _potion_icon: ItemIcon
+var _potion_label: Label
 var _symbol_slot: PanelContainer
 var _symbol_icon: ItemIcon
 var _symbol_on: bool = false
@@ -57,6 +67,11 @@ var _journal_box: VBoxContainer
 var _eq_icon: ItemIcon
 var _eq_name: Label
 var _eq_stat: Label
+var _eq_shield_name: Label
+var _stat_hp: Label
+var _stat_dmg: Label
+var _stat_level: Label
+var _stat_gold: Label
 var _detail_name: Label
 var _detail_desc: Label
 var _detail_stat: Label
@@ -109,9 +124,14 @@ func setup(player: Player, instance_count: int) -> void:
 	player.hp_changed.connect(_on_hp)
 	player.stamina_changed.connect(_on_stamina)
 	player.sword_state_changed.connect(_on_sword)
+	player.shield_state_changed.connect(_on_shield)
 	player.prompt_changed.connect(_on_prompt)
 	player.inventory_toggled.connect(_on_inventory)
 	player.inventory_changed.connect(_on_inv_changed)
+	player.supplies_changed.connect(_on_supplies)
+	player.xp_changed.connect(_on_xp)
+	player.gold_changed.connect(_on_gold)
+	player.notified.connect(_on_notify)
 	player.journal_toggled.connect(_on_journal_key)
 	player.hurt.connect(_on_hurt)
 	player.died.connect(_on_died)
@@ -120,6 +140,10 @@ func setup(player: Player, instance_count: int) -> void:
 	_on_hp(player.hp, player.max_hp)
 	_on_stamina(player.stamina, player.max_stamina)
 	_on_sword(player.has_sword, player.sword_equipped)
+	_on_shield(player.has_shield, player.shield_equipped)
+	_on_xp(player.level, player.xp, player.xp_needed)
+	_on_gold(player.gold)
+	_on_supplies()
 	_on_prompt("")
 	_symbol_slot.visible = false
 
@@ -257,6 +281,36 @@ func _build_bars() -> void:
 	_st_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	st_bg.add_child(_st_fill)
 
+	# XP: thin ash-gold strip above the HP bar.
+	var xp_bg := _bar_panel(Vector2(16, 94), Vector2(300, 12))
+	_xp_fill = ColorRect.new()
+	_xp_fill.color = UIStyle.GOLD
+	_xp_fill.position = Vector2(3, 3)
+	_xp_fill.size = Vector2(0, 6)
+	_xp_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	xp_bg.add_child(_xp_fill)
+	_xp_label = UIStyle.label("", 9, Color(1, 0.95, 0.8, 0.85))
+	_xp_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_xp_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_xp_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_xp_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	xp_bg.add_child(_xp_label)
+
+	# Gold purse.
+	var gold_bg := _bar_panel(Vector2(322, 34), Vector2(112, 18))
+	var gold_row := HBoxContainer.new()
+	gold_row.add_theme_constant_override("separation", 5)
+	gold_row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	gold_row.offset_left = 6.0
+	gold_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	gold_bg.add_child(gold_row)
+	var coin := ItemIcon.new("coin")
+	coin.custom_minimum_size = Vector2(14, 14)
+	gold_row.add_child(coin)
+	_gold_label = UIStyle.label("0", 12, Color(0.95, 0.85, 0.55))
+	_gold_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	gold_row.add_child(_gold_label)
+
 
 func _build_tracker() -> void:
 	_tracker = PanelContainer.new()
@@ -312,7 +366,7 @@ func _build_hotbar() -> void:
 	_slot_panel.anchor_top = 1.0
 	_slot_panel.anchor_bottom = 1.0
 	_slot_panel.offset_left = -92.0
-	_slot_panel.offset_top = -104.0
+	_slot_panel.offset_top = -128.0
 	_slot_panel.offset_right = -16.0
 	_slot_panel.offset_bottom = -30.0
 	_slot_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -328,6 +382,42 @@ func _build_hotbar() -> void:
 	_hotbar_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(_hotbar_label)
 
+	# Second row: shield + potion slots side by side.
+	var row2 := HBoxContainer.new()
+	row2.add_theme_constant_override("separation", 6)
+	row2.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.add_child(row2)
+
+	_shield_slot = PanelContainer.new()
+	_shield_slot.add_theme_stylebox_override("panel", _slot_normal)
+	_shield_slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row2.add_child(_shield_slot)
+	var shield_v := VBoxContainer.new()
+	shield_v.add_theme_constant_override("separation", 0)
+	_shield_slot.add_child(shield_v)
+	_shield_icon = ItemIcon.new("shield")
+	_shield_icon.custom_minimum_size = Vector2(24, 24)
+	_shield_icon.visible = false
+	shield_v.add_child(_shield_icon)
+	_shield_label = UIStyle.label("2 · —", 11, UIStyle.PARCHMENT_DIM)
+	_shield_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	shield_v.add_child(_shield_label)
+
+	_potion_slot = PanelContainer.new()
+	_potion_slot.add_theme_stylebox_override("panel", _slot_normal)
+	_potion_slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row2.add_child(_potion_slot)
+	var potion_v := VBoxContainer.new()
+	potion_v.add_theme_constant_override("separation", 0)
+	_potion_slot.add_child(potion_v)
+	_potion_icon = ItemIcon.new("potion")
+	_potion_icon.custom_minimum_size = Vector2(24, 24)
+	_potion_icon.visible = false
+	potion_v.add_child(_potion_icon)
+	_potion_label = UIStyle.label("3 · x0", 11, UIStyle.PARCHMENT_DIM)
+	_potion_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	potion_v.add_child(_potion_label)
+
 	# The hand symbol appears next to the hotbar after the intro.
 	_symbol_slot = PanelContainer.new()
 	var sym_sb := UIStyle.panel(Color(0.06, 0.05, 0.05, 0.75), UIStyle.GOLD_DIM, 8, 1)
@@ -341,9 +431,9 @@ func _build_hotbar() -> void:
 	_symbol_slot.anchor_top = 1.0
 	_symbol_slot.anchor_bottom = 1.0
 	_symbol_slot.offset_left = -144.0
-	_symbol_slot.offset_top = -104.0
+	_symbol_slot.offset_top = -128.0
 	_symbol_slot.offset_right = -100.0
-	_symbol_slot.offset_bottom = -60.0
+	_symbol_slot.offset_bottom = -84.0
 	_symbol_slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_symbol_slot)
 	_symbol_icon = ItemIcon.new("rune")
@@ -666,6 +756,15 @@ func _build_inventory() -> void:
 	eq_row.add_child(_eq_name)
 	_eq_stat = UIStyle.label("", 12, UIStyle.PARCHMENT_DIM)
 	eq_v.add_child(_eq_stat)
+	var shield_eq_row := HBoxContainer.new()
+	shield_eq_row.add_theme_constant_override("separation", 10)
+	eq_v.add_child(shield_eq_row)
+	var shield_eq_icon := ItemIcon.new("shield")
+	shield_eq_icon.custom_minimum_size = Vector2(30, 30)
+	shield_eq_row.add_child(shield_eq_icon)
+	_eq_shield_name = UIStyle.label("— предплечье", 14)
+	_eq_shield_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	shield_eq_row.add_child(_eq_shield_name)
 
 	var stats_header := UIStyle.title_label("ГЕРОЙ", 14)
 	left.add_child(stats_header)
@@ -675,10 +774,15 @@ func _build_inventory() -> void:
 	var stats_v := VBoxContainer.new()
 	stats_v.add_theme_constant_override("separation", 4)
 	stats_panel.add_child(stats_v)
-	stats_v.add_child(UIStyle.label("Жизни:  100", 13))
+	_stat_level = UIStyle.label("Уровень:  1", 13)
+	stats_v.add_child(_stat_level)
+	_stat_hp = UIStyle.label("Жизни:  100", 13)
+	stats_v.add_child(_stat_hp)
 	stats_v.add_child(UIStyle.label("Силы:  100", 13))
-	var dmg_row := UIStyle.label("Урон:  34", 13)
-	stats_v.add_child(dmg_row)
+	_stat_dmg = UIStyle.label("Урон:  34", 13)
+	stats_v.add_child(_stat_dmg)
+	_stat_gold = UIStyle.label("Золото:  0", 13, Color(0.95, 0.85, 0.55))
+	stats_v.add_child(_stat_gold)
 	stats_v.add_child(UIStyle.label("Эхо:  слышит мёртвых", 13, UIStyle.PARCHMENT_DIM))
 
 	var right := VBoxContainer.new()
@@ -761,12 +865,15 @@ func _rebuild_items() -> void:
 		(c as Node).queue_free()
 	if _player == null:
 		return
-	if _player.inventory.is_empty():
+	var any := not _player.inventory.is_empty() or not _player.supplies.is_empty()
+	if not any:
 		var empty := UIStyle.label("Пусто. Мир велик — загляни в углы.", 13, UIStyle.PARCHMENT_DIM)
 		_items_box.add_child(empty)
 		return
 	for id in _player.inventory:
 		_items_box.add_child(_make_item_row(str(id)))
+	for id in _player.supplies:
+		_items_box.add_child(_make_supply_row(str(id), int(_player.supplies[id])))
 
 
 func _make_item_row(id: String) -> Control:
@@ -790,7 +897,19 @@ func _make_item_row(id: String) -> Control:
 	row.add_child(h)
 
 	var kind := str(meta.get("type", "note"))
-	var icon_kind := "sword" if kind == "weapon" else ("shard" if kind == "quest" else "note")
+	var icon_kind := "sword"
+	if kind == "weapon":
+		icon_kind = "sword"
+	elif kind == "shield":
+		icon_kind = "shield"
+	elif kind == "quest":
+		icon_kind = "shard"
+	elif kind == "consumable" and str(meta.get("use", "")) == "sharpen":
+		icon_kind = "stone"
+	elif kind == "consumable":
+		icon_kind = "potion"
+	else:
+		icon_kind = "note"
 	var icon := ItemIcon.new(icon_kind)
 	icon.custom_minimum_size = Vector2(26, 26)
 	h.add_child(icon)
@@ -810,6 +929,44 @@ func _make_item_row(id: String) -> Control:
 
 	var hint := UIStyle.label(type_text, 11, UIStyle.PARCHMENT_DIM)
 	v.add_child(hint)
+
+	row.gui_input.connect(_on_row_input.bind(id))
+	row.mouse_entered.connect(_on_row_hover.bind(row, true))
+	row.mouse_exited.connect(_on_row_hover.bind(row, false))
+	return row
+
+
+## A stackable supply row (potions, whetstones) with a count badge.
+func _make_supply_row(id: String, count: int) -> Control:
+	var meta := ItemDB.get_item(id)
+	var row := PanelContainer.new()
+	var selected := id == _selected_id
+	var sb := UIStyle.panel(UIStyle.INK_SOFT if not selected else Color(0.16, 0.13, 0.08, 0.95),
+			UIStyle.GOLD if selected else UIStyle.GOLD_DIM, 7, 1 if not selected else 2)
+	sb.content_margin_left = 10.0
+	sb.content_margin_right = 10.0
+	sb.content_margin_top = 6.0
+	sb.content_margin_bottom = 6.0
+	row.add_theme_stylebox_override("panel", sb)
+	row.mouse_filter = Control.MOUSE_FILTER_STOP
+	row.set_meta("id", id)
+
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 10)
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(h)
+	var use := str(meta.get("use", ""))
+	var icon := ItemIcon.new("potion" if use == "heal" else "stone")
+	icon.custom_minimum_size = Vector2(26, 26)
+	h.add_child(icon)
+	var v := VBoxContainer.new()
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(v)
+	v.add_child(UIStyle.label(str(meta.get("name", id)), 14))
+	v.add_child(UIStyle.label(str(meta.get("stat", "")), 11, UIStyle.PARCHMENT_DIM))
+	var count_l := UIStyle.label("x%d" % count, 15, UIStyle.GOLD)
+	h.add_child(count_l)
 
 	row.gui_input.connect(_on_row_input.bind(id))
 	row.mouse_entered.connect(_on_row_hover.bind(row, true))
@@ -855,8 +1012,13 @@ func _refresh_detail() -> void:
 	_detail_desc.text = str(meta.get("desc", ""))
 	_detail_stat.text = str(meta.get("stat", ""))
 	var kind := str(meta.get("type", ""))
-	_btn_action.visible = kind == "weapon"
-	_btn_action.text = "Снять" if (_player != null and _player.sword_equipped) else "Экипировать"
+	_btn_action.visible = kind == "weapon" or kind == "shield" or kind == "consumable"
+	if kind == "weapon":
+		_btn_action.text = "Снять" if (_player != null and _player.sword_equipped) else "Экипировать"
+	elif kind == "shield":
+		_btn_action.text = "Снять" if (_player != null and _player.shield_equipped) else "Взять в руку"
+	elif kind == "consumable":
+		_btn_action.text = "Выпить" if str(meta.get("use", "")) == "heal" else "Заточить меч"
 	_btn_read.visible = kind == "note"
 
 
@@ -901,8 +1063,18 @@ func _rebuild_journal() -> void:
 
 
 func _on_action_pressed() -> void:
-	if _player != null and _selected_id == "steel_sword":
+	if _player == null or _selected_id == "":
+		return
+	var meta := ItemDB.get_item(_selected_id)
+	var kind := str(meta.get("type", ""))
+	if _selected_id == "steel_sword":
 		_player.toggle_equip()
+	elif kind == "shield" and _player.has_item(_selected_id):
+		_player.toggle_shield_equip()
+	elif kind == "consumable":
+		_player.use_supply(_selected_id)
+		_rebuild_items()
+		_refresh_detail()
 
 
 func _on_read_pressed() -> void:
@@ -992,6 +1164,60 @@ func _on_sword(has_sword: bool, equipped: bool) -> void:
 		_rebuild_items()
 
 
+func _on_shield(has_shield: bool, equipped: bool) -> void:
+	_shield_icon.visible = has_shield
+	if has_shield:
+		_shield_label.text = "2 · щит"
+		_shield_label.add_theme_color_override("font_color",
+							UIStyle.PARCHMENT if equipped else UIStyle.PARCHMENT_DIM)
+		_shield_slot.add_theme_stylebox_override("panel", _slot_equipped if equipped else _slot_normal)
+		_eq_shield_name.text = "Дубовый щит" if equipped else "— предплечье"
+	else:
+		_shield_label.text = "2 · —"
+		_eq_shield_name.text = "— предплечье"
+	_refresh_detail()
+	if _inv_tab == 0 and _inventory_panel.visible:
+		_rebuild_items()
+
+
+func _on_xp(level: int, xp: int, needed: int) -> void:
+	var ratio := clampf(float(xp) / float(maxi(needed, 1)), 0.0, 1.0)
+	_xp_fill.size.x = 294.0 * ratio
+	_xp_label.text = "Ур. %d · %d / %d" % [level, xp, needed]
+	if _stat_level != null:
+		_stat_level.text = "Уровень:  %d" % level
+	_refresh_stats()
+
+
+func _on_gold(gold: int) -> void:
+	_gold_label.text = str(gold)
+	_refresh_stats()
+
+
+func _on_supplies() -> void:
+	if _player == null:
+		return
+	var potions := _player.supply_count("health_potion")
+	_potion_icon.visible = potions > 0
+	_potion_label.text = "3 · x%d" % potions
+	_potion_label.add_theme_color_override("font_color",
+							UIStyle.PARCHMENT if potions > 0 else UIStyle.PARCHMENT_DIM)
+	if _inv_tab == 0 and _inventory_panel.visible:
+		_rebuild_items()
+
+
+func _on_notify(text: String) -> void:
+	toast(text)
+
+
+func _refresh_stats() -> void:
+	if _player == null or _stat_hp == null:
+		return
+	_stat_hp.text = "Жизни:  %d" % int(_player.max_hp)
+	_stat_dmg.text = "Урон:  %d" % int(_player.attack_damage)
+	_stat_gold.text = "Золото:  %d" % _player.gold
+
+
 func _on_prompt(text: String) -> void:
 	_prompt.text = text
 
@@ -1020,10 +1246,15 @@ func _rebuild_equipment_card() -> void:
 		return
 	if _player.sword_equipped:
 		_eq_name.text = "Стальной меч"
-		_eq_stat.text = "Урон 34"
+		_eq_stat.text = "Урон %d" % int(_player.attack_damage)
 	else:
 		_eq_name.text = "— руки"
 		_eq_stat.text = ""
+	if _player.shield_equipped:
+		_eq_shield_name.text = "Дубовый щит"
+	else:
+		_eq_shield_name.text = "— предплечье"
+	_refresh_stats()
 
 
 func _on_equip_pressed() -> void:

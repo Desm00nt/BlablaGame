@@ -4,12 +4,15 @@ extends Node3D
 ## Story landmarks built from primitives, one node per location:
 ##   "camp"    - the wrecked caravan the hero wakes in (scorch, burnt tents,
 ##               fire pit, bodies, the note pickup, the campfire echo)
-##   "village" - Каменный Брод: huts, fence, banner, a fire and Ингвар
+##   "village" - Каменный Брод: huts, fence, banner, a fire, Ингвар, a chest
 ##   "barrow"  - Аш-Вейл: burial mound, stone door, runestones, the black
 ##               echo stone (plus colliders for mound/door)
+##   "dungeon" - Курганные Чертоги: a sunken stone courtyard (the terrain pit
+##               is carved by TerrainNoise), ring wall with a gate, braziers,
+##               sarcophagi, a raised platform and the boss chest
 ##
 ## The node sits at ground level (y = terrain height); everything is local.
-## One OmniLight per fire with a cheap two-sine flicker; shadows off on
+## One OmniLight per flame with a cheap two-sine flicker; shadows off on
 ## lights, on for the geometry.
 
 var kind: String = "camp"
@@ -23,6 +26,7 @@ var echo_point: EchoPoint = null
 var _t: float = 0.0
 var _flicker_light: OmniLight3D = null
 var _flicker_base: float = 1.6
+var _flicker_lights: Array[OmniLight3D] = []
 var _rune_mat: StandardMaterial3D = null
 
 
@@ -34,6 +38,8 @@ func _ready() -> void:
 			_build_village()
 		"barrow":
 			_build_barrow()
+		"dungeon":
+			_build_dungeon()
 		_:
 			push_error("[Landmark] unknown kind '%s'" % kind)
 
@@ -43,6 +49,10 @@ func _process(delta: float) -> void:
 	if _flicker_light != null:
 		_flicker_light.light_energy = _flicker_base * (0.86 + 0.10 * sin(_t * 11.0) \
 				+ 0.06 * sin(_t * 23.7))
+	for light in _flicker_lights:
+		light.light_energy = light.get_meta("base", 1.4) \
+				* (0.84 + 0.12 * sin(_t * 9.7 + light.get_meta("ph", 0.0)) \
+				+ 0.05 * sin(_t * 27.3 + light.get_meta("ph", 0.0) * 2.0))
 	if _rune_mat != null:
 		_rune_mat.emission_energy_multiplier = 1.2 + 0.5 * sin(_t * 1.7)
 
@@ -125,12 +135,39 @@ func _build_fire(pos: Vector3, light_range: float) -> void:
 	fire_pos = pos
 
 
+## Standing iron brazier on a stone leg - dungeon lighting.
+func _build_brazier(pos: Vector3, intensity: float = 1.4) -> void:
+	var iron := _mat(Color(0.24, 0.23, 0.22), 0.6, 0.5)
+	var stone := _mat(Color(0.30, 0.29, 0.28), 0.95)
+	_cyl(self, 0.16, 0.2, 1, 8, stone, pos + Vector3(0.0, 0.5, 0.0))
+	_cyl(self, 0.05, 0.07, 1, 7, iron, pos + Vector3(0.0, 0.28, 0.0))
+	var bowl := _cyl(self, 0.3, 0.18, 1, 10, iron, pos + Vector3(0.0, 0.86, 0.0))
+	var coal_mat := _mat(Color(1.0, 0.5, 0.14), 0.7)
+	coal_mat.emission_enabled = true
+	coal_mat.emission = Color(1.0, 0.5, 0.13)
+	coal_mat.emission_energy_multiplier = 2.6
+	bowl.material_override = iron
+	var coals := _cyl(self, 0.24, 0.26, 1, 10, null, pos + Vector3(0.0, 0.92, 0.0))
+	coals.material_override = coal_mat
+	var light := OmniLight3D.new()
+	light.light_color = Color(1.0, 0.6, 0.28)
+	light.light_energy = intensity
+	light.omni_range = 11.0
+	light.shadow_enabled = false
+	light.position = pos + Vector3(0.0, 1.35, 0.0)
+	light.set_meta("base", intensity)
+	light.set_meta("ph", randf_range(0.0, TAU))
+	add_child(light)
+	_flicker_lights.append(light)
+
+
 func _add_collider(shape_owner: StaticBody3D, shape: Shape3D, pos: Vector3,
-		scale_v: Vector3 = Vector3.ONE) -> void:
+		scale_v: Vector3 = Vector3.ONE, rot_deg: Vector3 = Vector3.ZERO) -> void:
 	var col := CollisionShape3D.new()
 	col.shape = shape
 	col.position = pos
 	col.scale = scale_v
+	col.rotation_degrees = rot_deg
 	shape_owner.add_child(col)
 
 
@@ -227,16 +264,19 @@ func _build_village() -> void:
 		hut.position = pos
 		hut.rotation.y = deg_to_rad(ang)
 		add_child(hut)
-		_box(hut, Vector3(2.8, 2.1, 2.4), wall, Vector3(0.0, 1.05, 0.0))
+		# Stone plinth slightly wider than the wall: reads as a footing
+		# and hides any hairline gap between hut and the flattened pad.
+		_box(hut, Vector3(3.1, 0.28, 2.7), stone, Vector3(0.0, 0.14, 0.0))
+		_box(hut, Vector3(2.8, 2.1, 2.4), wall, Vector3(0.0, 1.05 + 0.22, 0.0))
 		var roof := PrismMesh.new()
 		roof.size = Vector3(3.3, 1.3, 3.0)
 		var roof_mi := MeshInstance3D.new()
 		roof_mi.mesh = roof
 		roof_mi.material_override = straw
-		roof_mi.position = Vector3(0.0, 2.75, 0.0)
+		roof_mi.position = Vector3(0.0, 2.75 + 0.22, 0.0)
 		hut.add_child(roof_mi)
-		_box(hut, Vector3(0.8, 1.5, 0.08), plank, Vector3(0.0, 0.75, 1.22))
-		_box(hut, Vector3(0.5, 0.5, 0.08), stone, Vector3(-0.9, 1.2, 1.22))
+		_box(hut, Vector3(0.8, 1.5, 0.08), plank, Vector3(0.0, 0.75 + 0.22, 1.22))
+		_box(hut, Vector3(0.5, 0.5, 0.08), stone, Vector3(-0.9, 1.2 + 0.22, 1.22))
 
 	_build_fire(Vector3(0.0, 0.0, 0.5), 8.0)
 
@@ -269,6 +309,17 @@ func _build_village() -> void:
 		"cape": Color(0.22, 0.20, 0.30),
 		"eyes": Color(0.12, 0.12, 0.14),
 	})
+
+	# Supply chest tucked behind the eastern hut.
+	var chest := Chest.new()
+	chest.name = "VillageChest"
+	chest.position = Vector3(5.6, 0.0, -1.6)
+	chest.rotation.y = deg_to_rad(-38.0)
+	chest.contents = [
+		{"kind": "gold", "amount": 25},
+		{"kind": "supply", "id": "health_potion", "count": 1},
+	]
+	add_child(chest)
 
 
 # --- barrow ------------------------------------------------------------------
@@ -333,3 +384,131 @@ func _build_barrow() -> void:
 	jamb.size = Vector3(0.5, 3.4, 0.6)
 	_add_collider(body, jamb, Vector3(-1.5, 1.6, 6.2))
 	_add_collider(body, jamb, Vector3(1.5, 1.6, 6.2))
+
+
+# --- dungeon -----------------------------------------------------------------
+#
+# Курганные Чертоги: a sunken burial courtyard. The terrain carves the pit
+# (TerrainNoise PAD3 + bowl), so this builder only drops structures onto the
+# flat floor: a ring wall with a gate facing the approach (+Z), braziers,
+# sarcophagi, bone piles, a central platform and the boss chest. Draugr
+# garrison and loot are wired in main.gd.
+
+const DUNGEON_WALL_RADIUS: float = 8.4
+const DUNGEON_GATE_HALF_ARC: float = 0.42  # radians of gate opening either side of +Z
+
+
+func _build_dungeon() -> void:
+	var stone := _mat(Color(0.33, 0.32, 0.31), 0.95)
+	var stone_dark := _mat(Color(0.26, 0.25, 0.24), 0.97)
+	var bone := _mat(Color(0.72, 0.68, 0.58), 0.95)
+	var body := _static_body()
+
+	# Ring wall: 12 segments, the two flanking +Z are skipped for the gate.
+	var seg_len := 4.6
+	for i in 12:
+		var ang := TAU * float(i) / 12.0
+		# Angle measured from +Z; the gate straddles ang == 0.
+		var gate_dist := absf(angle_difference(ang, 0.0))
+		if gate_dist < DUNGEON_GATE_HALF_ARC:
+			continue
+		var w := Vector3(sin(ang), 0.0, cos(ang))
+		var seg_pos := w * DUNGEON_WALL_RADIUS
+		_box(self, Vector3(seg_len, 3.4, 0.75), stone,
+				seg_pos + Vector3(0.0, 1.7, 0.0),
+				Vector3(0.0, rad_to_deg(ang), 0.0))
+		_add_collider(body, _box_shape(Vector3(seg_len, 3.4, 0.75)),
+				seg_pos + Vector3(0.0, 1.7, 0.0),
+				Vector3.ONE,
+				Vector3(0.0, rad_to_deg(ang), 0.0))
+
+	# Gate posts + lintel over the opening.
+	for side in [-1.0, 1.0]:
+		var p := Vector3(side * sin(DUNGEON_GATE_HALF_ARC) * (DUNGEON_WALL_RADIUS - 0.2),
+				0.0, cos(DUNGEON_GATE_HALF_ARC) * (DUNGEON_WALL_RADIUS - 0.2))
+		_cyl(self, 0.28, 0.34, 1, 9, stone_dark, p + Vector3(0.0, 1.9, 0.0))
+		_add_collider(body, _cyl_shape(0.34, 3.8), p + Vector3(0.0, 1.9, 0.0))
+	var lintel := _box(self, Vector3(4.4, 0.6, 0.9), stone_dark, Vector3(0.0, 3.55, DUNGEON_WALL_RADIUS - 0.2))
+	lintel.name = "GateLintel"
+
+	# Central raised platform: two stacked cylinders with worn steps.
+	_cyl(self, 2.6, 2.9, 1, 18, stone_dark, Vector3(0.0, 0.28, 0.0))
+	_cyl(self, 2.1, 2.3, 1, 16, stone, Vector3(0.0, 0.56, 0.0))
+	_add_collider(body, _cyl_shape(2.9, 0.56), Vector3(0.0, 0.28, 0.0))
+	_add_collider(body, _cyl_shape(2.3, 0.56), Vector3(0.0, 0.84, 0.0), Vector3.ONE)
+	# (upper disc sits at y 0.56..1.12: collider centered to match)
+
+	# Braziers: four around the ring, two by the gate.
+	_build_brazier(Vector3(-5.6, 0.0, -3.4))
+	_build_brazier(Vector3(5.6, 0.0, -3.4))
+	_build_brazier(Vector3(-5.2, 0.0, 4.8), 1.2)
+	_build_brazier(Vector3(5.2, 0.0, 4.8), 1.2)
+
+	# Sarcophagi: three stone boxes with lids, lid ajar on one.
+	for s in 3:
+		var ang := PI * 0.5 + float(s) * TAU / 3.0
+		var p := Vector3(cos(ang) * 5.4, 0.0, sin(ang) * 5.4)
+		var sarc := Node3D.new()
+		sarc.position = p
+		sarc.rotation.y = -ang + PI * 0.5
+		add_child(sarc)
+		_box(sarc, Vector3(2.2, 0.85, 1.05), stone, Vector3(0.0, 0.42, 0.0))
+		var lid := _box(sarc, Vector3(2.3, 0.18, 1.15), stone_dark,
+				Vector3(0.0, 0.94, 0.0 if s != 1 else 0.12))
+		lid.rotation_degrees = Vector3(0.0, 0.0, 0.0 if s != 1 else -14.0)
+		_add_collider(body, _box_shape(Vector3(2.2, 0.9, 1.05)),
+				Vector3(cos(ang) * 5.4, 0.45, sin(ang) * 5.4),
+				Vector3.ONE, Vector3(0.0, rad_to_deg(-ang + PI * 0.5), 0.0))
+
+	# Bone piles and rubble for texture.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 77
+	for b in 10:
+		var ang := rng.randf_range(0.0, TAU)
+		var r := rng.randf_range(3.4, 7.4)
+		var p := Vector3(cos(ang) * r, 0.0, sin(ang) * r)
+		var pile := Node3D.new()
+		pile.position = p
+		add_child(pile)
+		for k in 3:
+			var bone_mesh := SphereMesh.new()
+			bone_mesh.radius = rng.randf_range(0.06, 0.12)
+			bone_mesh.height = bone_mesh.radius * 2.0
+			bone_mesh.radial_segments = 8
+			bone_mesh.rings = 4
+			var bm := MeshInstance3D.new()
+			bm.mesh = bone_mesh
+			bm.material_override = bone
+			bm.position = Vector3(rng.randf_range(-0.25, 0.25),
+					0.06 + 0.06 * float(k), rng.randf_range(-0.25, 0.25))
+			bm.scale = Vector3(1.0, 0.6, 1.6)
+			pile.add_child(bm)
+		var rubble := _box(self, Vector3(0.5, 0.3, 0.5), stone_dark, p + Vector3(0.3, 0.15, 0.2),
+				Vector3(0.0, rad_to_deg(rng.randf_range(0.0, TAU)), 0.0))
+		rubble.scale = Vector3(1.0, 1.0, 1.0)
+
+	# The boss chest on the platform.
+	var chest := Chest.new()
+	chest.name = "DungeonChest"
+	chest.position = Vector3(0.0, 1.12, 0.0)
+	chest.contents = [
+		{"kind": "item", "id": "oak_shield"},
+		{"kind": "gold", "amount": 60},
+		{"kind": "supply", "id": "health_potion", "count": 2},
+		{"kind": "supply", "id": "whetstone", "count": 1},
+	]
+	add_child(chest)
+
+
+## Small helpers so collider shapes stay in one place.
+func _box_shape(size_v: Vector3) -> BoxShape3D:
+	var shape := BoxShape3D.new()
+	shape.size = size_v
+	return shape
+
+
+func _cyl_shape(radius: float, height: float) -> CylinderShape3D:
+	var shape := CylinderShape3D.new()
+	shape.radius = radius
+	shape.height = height
+	return shape

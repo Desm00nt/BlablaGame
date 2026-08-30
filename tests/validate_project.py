@@ -277,11 +277,11 @@ def instance_budget():
     trees = int(vals["tree_count"])
     rocks = int(vals["rock_count"])
     total = grass + flowers + trees + rocks
-    check(total <= 3000, f"MultiMesh instances {total} > 3000")
+    check(total <= 8000, f"MultiMesh instances {total} > 8000")
     print(f"[6] MultiMesh instances: grass {grass} + flowers {flowers} + trees {trees} "
-          f"+ rocks {rocks} = {total} / 3000")
-    check("MAX_MULTIMESH_INSTANCES: int = 3000" in read("scripts/main.gd"),
-          "main.gd does not enforce the 3000 instance ceiling")
+          f"+ rocks {rocks} = {total} / 8000")
+    check("MAX_MULTIMESH_INSTANCES: int = 8000" in read("scripts/main.gd"),
+          "main.gd does not enforce the 8000 instance ceiling")
 
 
 # ------------------------------------------- 6. scene/script name agreement
@@ -302,19 +302,19 @@ def scene_contract():
           "WorldGenerator / TimeManager nodes missing from main.tscn")
     check(re.search(r"directional_shadow_mode = 1\b", main),
           "main.tscn: directional_shadow_mode must be 1 (SHADOW_PARALLEL_2_SPLITS)")
-    check(re.search(r"directional_shadow_max_distance = 60\.0\b", main),
-          "main.tscn: directional_shadow_max_distance must be 60")
-    check("subdivide_width = 96" in main and "subdivide_depth = 96" in main,
-          "main.tscn: terrain subdivide must be 96x96")
-    check("subdivide_width = 32" in main and "subdivide_depth = 32" in main,
-          "main.tscn: water subdivide must be 32x32")
+    check(re.search(r"directional_shadow_max_distance = 95\.0\b", main),
+          "main.tscn: directional_shadow_max_distance must be 95")
+    check("subdivide_width = 192" in main and "subdivide_depth = 192" in main,
+          "main.tscn: terrain subdivide must be 192x192")
+    check("subdivide_width = 64" in main and "subdivide_depth = 64" in main,
+          "main.tscn: water subdivide must be 64x64")
     check(re.search(r"transform = Transform3D\(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1\.5, 0\)", main),
           "main.tscn: Water must sit at y = -1.5")
     check("ssao_enabled = true" in main and "glow_enabled = true" in main and "tonemap_mode = 3" in main,
           "main.tscn: SSAO / glow / ACES tonemap not enabled")
     check("ssao_radius = 1.0" in main and "glow_intensity = 0.3" in main,
           "main.tscn: SSAO radius must be 1.0 and glow intensity 0.3")
-    print("[7] scene node names match script lookups; shadows 2 splits @60 m; subdivide 96/32")
+    print("[7] scene node names match script lookups; shadows 2 splits @95 m; subdivide 192/64")
 
 
 # ------------------------------------------- 7. assets / paths / input map

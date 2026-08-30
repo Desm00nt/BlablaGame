@@ -25,6 +25,14 @@ func _draw() -> void:
 			_draw_note(c)
 		"rune":
 			_draw_rune(c)
+		"shield":
+			_draw_shield(c)
+		"potion":
+			_draw_potion(c)
+		"stone":
+			_draw_stone(c)
+		"coin":
+			_draw_coin(c)
 		_:
 			_draw_sword(c)
 
@@ -99,3 +107,45 @@ func _draw_rune(c: Vector2) -> void:
 		var dir := Vector2(cos(ang), sin(ang))
 		draw_line(c + dir * (r * 0.25), c + dir * (r * 1.45), UIStyle.GOLD, 2.0)
 	draw_circle(c, r * 0.16, UIStyle.GOLD)
+
+
+## Round shield: wooden disk, iron rim, steel boss.
+func _draw_shield(c: Vector2) -> void:
+	var r := minf(size.x, size.y) * 0.4
+	draw_circle(c, r, Color(0.40, 0.30, 0.17))
+	draw_arc(c, r, 0.0, TAU, 24, UIStyle.STEEL, 2.4)
+	# Vertical grain.
+	for i in 3:
+		var x := c.x + (float(i) - 1.0) * r * 0.42
+		draw_line(Vector2(x, c.y - r * 0.82), Vector2(x, c.y + r * 0.82),
+					Color(0.30, 0.22, 0.12), 1.4)
+	draw_circle(c, r * 0.26, UIStyle.STEEL)
+	draw_arc(c, r * 0.26, 0.0, TAU, 12, Color(0.35, 0.36, 0.38), 1.2)
+
+
+## Potion: round flask, red fill, corked neck, a glass glint.
+func _draw_potion(c: Vector2) -> void:
+	var w := size.x
+	var h := size.y
+	draw_rect(Rect2(c.x - w * 0.06, h * 0.10, w * 0.12, h * 0.16), Color(0.5, 0.38, 0.22))
+	draw_circle(Vector2(c.x, h * 0.62), w * 0.26, Color(0.72, 0.16, 0.13))
+	draw_circle(Vector2(c.x, h * 0.62), w * 0.26, Color(0.75, 0.78, 0.8, 0.35), false, 1.4)
+	draw_circle(Vector2(c.x - w * 0.09, h * 0.54), w * 0.05, Color(1, 1, 1, 0.5))
+
+
+## Whetstone: a grey rectangular bar with a darker worn face.
+func _draw_stone(c: Vector2) -> void:
+	var w := size.x
+	var h := size.y
+	draw_rect(Rect2(c.x - w * 0.3, h * 0.34, w * 0.6, h * 0.3), Color(0.48, 0.47, 0.45))
+	draw_rect(Rect2(c.x - w * 0.3, h * 0.34, w * 0.6, h * 0.3), UIStyle.GOLD_DIM, false, 1.0)
+	draw_line(Vector2(c.x - w * 0.2, h * 0.5), Vector2(c.x + w * 0.2, h * 0.5),
+				Color(0.36, 0.35, 0.34), 2.0)
+
+
+## Gold coin: warm disk with an inner ring.
+func _draw_coin(c: Vector2) -> void:
+	var r := minf(size.x, size.y) * 0.36
+	draw_circle(c, r, Color(0.92, 0.76, 0.28))
+	draw_arc(c, r * 0.68, 0.0, TAU, 16, Color(0.72, 0.55, 0.16), 1.6)
+	draw_circle(c + Vector2(-r * 0.25, -r * 0.25), r * 0.18, Color(1, 0.95, 0.7, 0.8))

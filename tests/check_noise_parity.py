@@ -71,6 +71,33 @@ def glsl_smoothstep(e0: float, e1: float, x: float) -> float:
 NOISE_INV_RANGE = 1.0 / 0.60
 NOISE_MIN = 0.10
 
+# Construction pads - mirrors TerrainNoise.PADS / the two shaders.
+PADS = [
+    (3.0, -2.5, 10.0, 1.0),
+    (36.0, 58.0, 18.0, 8.3),
+    (-72.0, 78.0, 15.0, 14.8),
+    (-40.0, -72.0, 24.0, 11.3),
+]
+PIT_INNER = 9.0
+PIT_OUTER = 18.0
+PIT_FLOOR = 6.5
+
+
+def _pad_apply(h, px, py):
+    """Flatten pads, then carve the dungeon pit. Order matters and must match
+    terrain_height() on the CPU and GPU."""
+    for (cx, cy, r, target) in PADS:
+        d = math.hypot(px - cx, py - cy)
+        if d < r:
+            w = 1.0 - glsl_smoothstep(r * 0.55, r, d)
+            h = f32(h + (target - h) * w)
+    dcx, dcy = PADS[3][0], PADS[3][1]
+    pd = math.hypot(px - dcx, py - dcy)
+    if pd < PIT_OUTER:
+        bowl = 1.0 - glsl_smoothstep(PIT_INNER, PIT_OUTER, pd)
+        h = f32(h + (PIT_FLOOR - h) * bowl)
+    return h
+
 
 def glsl_terrain_height(px: float, py: float) -> float:
     n = glsl_fbm(f32(px * 0.016), f32(py * 0.016))
@@ -78,6 +105,7 @@ def glsl_terrain_height(px: float, py: float) -> float:
     h = f32(f32(t * 12.0) + f32(pow(t, 3.0) * 10.0) - 3.0)
     s = glsl_smoothstep(5.0, 24.0, f32(math.sqrt(px * px + py * py)))
     h = f32(1.0 + (h - 1.0) * s)  # mix(SPAWN_HEIGHT, h, s)
+    h = _pad_apply(h, px, py)
     lr = math.sqrt((px - 42.0) ** 2 + (py + 30.0) ** 2)
     lake = f32(1.0 - glsl_smoothstep(13.0, 34.0, f32(lr)))
     return f32(h + (-6.5 - h) * lake)
@@ -131,6 +159,16 @@ def gd_terrain_height(px: float, py: float) -> float:
     h = t * 12.0 + pow(t, 3.0) * 10.0 - 3.0
     s = gd_smoothstep(5.0, 24.0, math.hypot(px, py))
     h = 1.0 + (h - 1.0) * s
+    for (cx, cy, r, target) in PADS:
+        d = math.hypot(px - cx, py - cy)
+        if d < r:
+            w = 1.0 - gd_smoothstep(r * 0.55, r, d)
+            h = h + (target - h) * w
+    dcx, dcy = PADS[3][0], PADS[3][1]
+    pd = math.hypot(px - dcx, py - dcy)
+    if pd < PIT_OUTER:
+        bowl = 1.0 - gd_smoothstep(PIT_INNER, PIT_OUTER, pd)
+        h = h + (PIT_FLOOR - h) * bowl
     lake = 1.0 - gd_smoothstep(13.0, 34.0, math.hypot(px - 42.0, py + 30.0))
     return h + (-6.5 - h) * lake
 
@@ -140,10 +178,10 @@ def main() -> int:
     failures = 0
 
     # 1) integer hash must be bit-identical (incl. the negative lattice cells
-    #    the terrain actually visits: p in [-100,100] * 0.016 * up to 8)
+    #    the terrain actually visits: p in [-200,200] * 0.016 * up to 8)
     checked = 0
-    for cx in range(8050, 8340, 7):
-        for cy in range(8050, 8340, 11):
+    for cx in range(8100, 8480, 7):
+        for cy in range(8100, 8480, 11):
             if gd_hash2f(cx, cy) != glsl_hash2f(cx, cy):
                 print(f"HASH MISMATCH at {cx},{cy}")
                 failures += 1
@@ -161,16 +199,16 @@ def main() -> int:
         print("    FAIL: value noise diverges")
         failures += 1
 
-    # 3) terrain height parity over the whole 200x200 world, plus the lake
+    # 3) terrain height parity over the whole 400x400 world, plus the lake
     worst_h = 0.0
     worst_at = (0.0, 0.0)
     hs = []
     n = 0
-    step = 200.0 / 256
+    step = 400.0 / 256
     for gx in range(257):
         for gz in range(0, 257, 3):
-            px = -100.0 + gx * step
-            py = -100.0 + gz * step
+            px = -200.0 + gx * step
+            py = -200.0 + gz * step
             a = gd_terrain_height(px, py)
             b = glsl_terrain_height(px, py)
             hs.append(a)
@@ -182,6 +220,21 @@ def main() -> int:
     if worst_h > 1e-3:
         print("    FAIL: CPU/GPU height fields diverge -> props would float")
         failures += 1
+
+    # 3b) every landmark pad must be exactly flat at its target height. The
+    # dungeon pad centre sits inside the pit bowl, so its surface is the pit
+    # floor, not the pad level.
+    for i, (cx, cy, r, target) in enumerate(PADS):
+        expect = PIT_FLOOR if i == 3 else target
+        a = gd_terrain_height(cx, cy)
+        b = glsl_terrain_height(cx, cy)
+        if abs(a - expect) > 1e-6:
+            print(f"    FAIL: pad centre ({cx},{cy}) is {a:.4f}, expected {expect}")
+            failures += 1
+        if abs(a - b) > 1e-6:
+            print(f"    FAIL: pad centre ({cx},{cy}) CPU/GPU mismatch {a:.6f} vs {b:.6f}")
+            failures += 1
+    print(f"[3b] pad centres flat and CPU/GPU-identical ({len(PADS)} pads)")
 
     # 4) sanity of the resulting landscape
     lo, hi = min(hs), max(hs)

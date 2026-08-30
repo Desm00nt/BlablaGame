@@ -18,15 +18,44 @@ const NOISE_OFFSET: int = 8192
 const TERRAIN_FREQ: float = 0.016
 const TERRAIN_OCTAVES: int = 4
 
-## Measured output range of fbm() over the whole 200x200 world:
-## [0.099, 0.699], median 0.515. NOT the theoretical [0, 0.9375]. Normalising
-## against the measured range is what makes the bands below predictable.
+## World is 400 x 400 m (4x the original 200 x 200 area). Every system that
+## hardcodes the old extent (scatter range, chunk bucketing, prop counts)
+## derives from WORLD_HALF instead.
+const WORLD_HALF: float = 200.0
+
+## Measured output range of fbm(): over 200x200 it was [0.099, 0.699]; over
+## the full 400x400 world it is [0.088, 0.817]. The constants below are kept
+## at the original 200x200 values on purpose: clamping swallows only ~0.04%
+## of terrain below zero and ~2.5% of the highest peaks into the plateau,
+## which is invisible in practice, and keeping them preserves the exact
+## height field the first three landmarks were placed against.
 const NOISE_MIN: float = 0.10
 const NOISE_INV_RANGE: float = 1.0 / 0.60
 
 const SPAWN_HEIGHT: float = 1.0
 const LAKE_CENTER: Vector2 = Vector2(42.0, -30.0)
 const LAKE_DEPTH: float = -6.5
+
+## Construction pads: the ground under each landmark is flattened to a fixed
+## target height so buildings always sit flush with the terrain (structures
+## used to float or sink on slopes). Entries: [center, radius, target_height].
+## The targets are the measured raw fbm heights at the centres (probe script),
+## hardcoded because the GLSL mirrors need constants too.
+const PADS: Array = [
+	[Vector2(3.0, -2.5), 10.0, 1.0],        # camp: equals SPAWN_HEIGHT
+	[Vector2(36.0, 58.0), 18.0, 8.3],       # village Kamenny Brod
+	[Vector2(-72.0, 78.0), 15.0, 14.8],     # barrow Ash-Veil
+	[Vector2(-40.0, -72.0), 24.0, 11.3],    # dungeon courtyard
+]
+
+## The dungeon pad carries a sunken courtyard: inside the bowl radius the
+## ground carves down to PIT_FLOOR, between bowl radii it ramps back up to the
+## pad level (walkable slope, no stairs needed).
+const DUNGEON_INDEX: int = 3
+const PIT_INNER: float = 9.0
+const PIT_OUTER: float = 18.0
+const PIT_DEPTH: float = 4.8
+const PIT_FLOOR: float = 11.3 - 4.8  # 6.5, comfortably above the water line
 
 ## Height of the water plane in main.tscn (Water node is translated to this y).
 const WATER_LEVEL: float = -1.5
@@ -73,15 +102,35 @@ static func fbm(p: Vector2) -> float:
 
 ## Shared height field. Must stay identical to terrain_height() in both shaders.
 static func terrain_height(p: Vector2) -> float:
-	var n: float = fbm(p * TERRAIN_FREQ)
-	var t: float = clampf((n - NOISE_MIN) * NOISE_INV_RANGE, 0.0, 1.0)
-	var h: float = t * 12.0 + pow(t, 3.0) * 10.0 - 3.0
+	var h: float = _raw_height(p)
 	# Flatten a spawn plateau around the world origin.
 	var s: float = smoothstep(5.0, 24.0, p.length())
 	h = lerpf(SPAWN_HEIGHT, h, s)
+	# Flatten the construction pads so landmarks sit flush with the ground.
+	for i in PADS.size():
+		var pad: Array = PADS[i]
+		var d := (p - (pad[0] as Vector2)).length()
+		var r: float = pad[1]
+		if d < r:
+			var w := 1.0 - smoothstep(r * 0.55, r, d)
+			h = lerpf(h, pad[2], w)
+	# Carve the dungeon courtyard into its pad.
+	var dc := PADS[DUNGEON_INDEX][0] as Vector2
+	var pd := (p - dc).length()
+	if pd < PIT_OUTER:
+		var bowl := 1.0 - smoothstep(PIT_INNER, PIT_OUTER, pd)
+		h = lerpf(h, PIT_FLOOR, bowl)
 	# Carve a lake basin so the water plane is visible.
 	var lake: float = 1.0 - smoothstep(13.0, 34.0, (p - LAKE_CENTER).length())
 	return lerpf(h, LAKE_DEPTH, lake)
+
+
+## The fbm height field without the spawn plateau, pads or lake. Pad target
+## heights in PADS were measured with this.
+static func _raw_height(p: Vector2) -> float:
+	var n: float = fbm(p * TERRAIN_FREQ)
+	var t: float = clampf((n - NOISE_MIN) * NOISE_INV_RANGE, 0.0, 1.0)
+	return t * 12.0 + pow(t, 3.0) * 10.0 - 3.0
 
 
 ## 0.0 on flat ground, approaching 1.0 on a vertical cliff.

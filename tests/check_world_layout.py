@@ -18,19 +18,19 @@ from check_noise_parity import gd_terrain_height  # noqa: E402
 WATER = -1.5
 GRASS_LINE = 8.0
 ROCK_LINE = 13.0
-CHUNK_GRID = 4
-CELL = 200.0 / CHUNK_GRID
-CEILING = 3000
+CHUNK_GRID = 8
+CELL = 400.0 / CHUNK_GRID
+CEILING = 8000
 
 # (name, count, water_clearance, max_height, max_slope, scale_min, scale_max)
 SPECS = [
-    ("Grass", 1650, 0.4, GRASS_LINE, 0.35, 0.75, 1.35),
-    ("Flowers_y", 117, 0.7, 6.0, 0.22, 0.80, 1.20),
-    ("Flowers_w", 117, 0.7, 6.0, 0.22, 0.80, 1.20),
-    ("Flowers_p", 117, 0.7, 6.0, 0.22, 0.80, 1.20),
-    ("TreesConifer", 25, 1.0, ROCK_LINE, 0.40, 0.75, 1.35),
-    ("TreesBroadleaf", 25, 1.0, ROCK_LINE, 0.40, 0.75, 1.30),
-    ("Rocks", 30, 0.3, 999.0, 2.0, 0.60, 2.20),
+    ("Grass", 4200, 0.4, GRASS_LINE, 0.35, 0.75, 1.35),
+    ("Flowers_y", 250, 0.7, 6.0, 0.22, 0.80, 1.20),
+    ("Flowers_w", 250, 0.7, 6.0, 0.22, 0.80, 1.20),
+    ("Flowers_p", 250, 0.7, 6.0, 0.22, 0.80, 1.20),
+    ("TreesConifer", 100, 1.0, ROCK_LINE, 0.40, 0.75, 1.35),
+    ("TreesBroadleaf", 100, 1.0, ROCK_LINE, 0.40, 0.75, 1.30),
+    ("Rocks", 100, 0.3, 999.0, 2.0, 0.60, 2.20),
 ]
 
 
@@ -45,7 +45,7 @@ def scatter(rng, count, clearance, max_h, max_slope):
     out, guard, attempts = [], 0, count * 40
     while len(out) < count and guard < attempts:
         guard += 1
-        px, py = rng.uniform(-95, 95), rng.uniform(-95, 95)
+        px, py = rng.uniform(-190, 190), rng.uniform(-190, 190)
         h = gd_terrain_height(px, py)
         if h < WATER + clearance or h > max_h:
             continue
@@ -67,8 +67,8 @@ def main():
         spots, guard = scatter(rng, count, clearance, max_h, max_slope)
         buckets = {}
         for px, h, pz in spots:
-            cx = min(max(int((px + 100.0) / CELL), 0), CHUNK_GRID - 1)
-            cz = min(max(int((pz + 100.0) / CELL), 0), CHUNK_GRID - 1)
+            cx = min(max(int((px + 200.0) / CELL), 0), CHUNK_GRID - 1)
+            cz = min(max(int((pz + 200.0) / CELL), 0), CHUNK_GRID - 1)
             buckets.setdefault((cx, cz), []).append((px, h, pz))
             if h < WATER:
                 problems.append(f"{name}: instance at height {h:.2f} is underwater")

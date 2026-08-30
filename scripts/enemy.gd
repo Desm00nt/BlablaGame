@@ -17,6 +17,10 @@ extends CharacterBody3D
 ##
 ## Facing comes from the rig itself: CharacterRig looks along -Z, and the yaw
 ## below steers -Z along the walk direction, so draugr run facing forward.
+##
+## Sound hooks: a growl on aggro, a thud on every wound, a descending tone on
+## death - all positional, resolved lazily through the "audio" group because
+## this node's _ready() runs before Main spawns the AudioManager.
 
 signal died(tag: String)
 
@@ -34,6 +38,8 @@ enum State { PATROL, CHASE, WINDUP, STRIKE_RECOVER, STAGGER, DEAD }
 ## Quest kill-counter tag ("" = not counted). main.gd forwards died(tag)
 ## into QuestManager.notify_kill().
 @export var kill_tag: String = ""
+## Bosses carry more XP and bigger loot in main.gd's death handler.
+var is_boss: bool = false
 
 const WINDUP_TIME: float = 0.45
 const RECOVER_TIME: float = 0.9
@@ -54,6 +60,7 @@ var _rig: CharacterRig
 var _hp_bar: Node3D
 var _hp_fill: MeshInstance3D
 var _bar_frame: int = 0
+var _audio: AudioManager
 
 
 func _ready() -> void:
@@ -101,6 +108,7 @@ func _physics_process(delta: float) -> void:
 				var p := _find_player()
 				if p != null and p.global_position.distance_to(global_position) < chase_radius:
 					_state = State.CHASE
+					_audio_play_at("growl")
 		State.CHASE:
 			var p := _find_player()
 			if p == null:
@@ -173,10 +181,11 @@ func _strike() -> void:
 	if p == null:
 		return
 	if p.global_position.distance_to(global_position) <= attack_range + 0.45 and p.has_method("take_damage"):
-		p.take_damage(damage, global_position)
+		# Passing self lets the player's parry stagger this enemy.
+		p.take_damage(damage, global_position, self)
 
 
-func take_damage(amount: float, from_pos: Vector3) -> void:
+func take_damage(amount: float, from_pos: Vector3, source: Node = null) -> void:
 	if _state == State.DEAD:
 		return
 	hp = maxf(hp - amount, 0.0)
@@ -185,12 +194,33 @@ func take_damage(amount: float, from_pos: Vector3) -> void:
 	if _knock.length() > 0.01:
 		_knock = _knock.normalized() * 5.5
 	_rig.flash_hurt()
+	_audio_play_at("hit", -6.0)
 	_update_fill()
 	if hp <= 0.0:
 		_die()
 	else:
 		_state = State.STAGGER
 		_timer = 0.0
+
+
+## A well-timed shield parry sends the draugr reeling backwards.
+func stagger_from_parry(from_pos: Vector3) -> void:
+	if _state == State.DEAD:
+		return
+	_state = State.STAGGER
+	_timer = 0.0
+	var dir := global_position - from_pos
+	dir.y = 0.0
+	if dir.length() > 0.01:
+		_knock = dir.normalized() * 7.5
+
+
+## Lazy positional audio: the AudioManager joins the tree after this node.
+func _audio_play_at(sfx_name: String, volume_db: float = 0.0) -> void:
+	if _audio == null and is_inside_tree():
+		_audio = get_tree().get_first_node_in_group("audio") as AudioManager
+	if _audio != null:
+		_audio.play_at(sfx_name, global_position, volume_db)
 
 
 func _die() -> void:
@@ -203,6 +233,7 @@ func _die() -> void:
 	set_deferred("collision_layer", 0)
 	set_deferred("collision_mask", 1)
 	_hp_bar.visible = false
+	_audio_play_at("death", -4.0)
 	died.emit(kill_tag)
 
 

@@ -15,15 +15,19 @@ extends Node
 ##   * the intro cutscene can be skipped and starts the first quest
 ##   * the campfire echo advances the quest instantly
 ##   * the Ingvar dialogue completes the quest and starts the barrow chain
-##   * barrow draugr spawn, die and tick the kill counter
+##   * barrow draugr spawn, die and tick the kill counter (and grant XP)
+##   * the dungeon garrison spawns far from the safe spawn plateau
+##   * shield, gold, XP and supplies all function end to end
 ##
 ## What it does NOT cover: shader compilation. --headless uses the dummy
 ## renderer, so GLSL is parsed but never compiled to SPIR-V.
 
 const CHECK_FRAME: int = 120
 const SKIP_CUTSCENE_FRAME: int = 25
-const EXPECTED_INSTANCES: int = 2081
-const INSTANCE_CEILING: int = 3000
+const EXPECTED_INSTANCES: int = 5250
+const INSTANCE_CEILING: int = 8000
+## The spawn plateau is a safe zone: no draugr may camp it.
+const SPAWN_SAFE_RADIUS: float = 30.0
 
 var _frame: int = 0
 var _failures: int = 0
@@ -96,6 +100,17 @@ func _check_terrain_collision() -> void:
 		sampled += 1
 	_expect(worst < 0.001,
 			"collision follows terrain_height() over %d samples (worst %0.6f m)" % [sampled, worst])
+
+	# Pads: the ground under every landmark must be exactly the pad height,
+	# otherwise structures float or sink. The dungeon centre sits in the pit
+	# bowl, so its surface is the pit floor instead of the pad level.
+	for i in TerrainNoise.PADS.size():
+		var pad: Array = TerrainNoise.PADS[i]
+		var c := pad[0] as Vector2
+		var target := TerrainNoise.PIT_FLOOR if i == TerrainNoise.DUNGEON_INDEX else float(pad[2])
+		var got := TerrainNoise.terrain_height(c)
+		_expect(absf(got - target) < 0.001,
+				"pad at (%0.0f,%0.0f) is flat at %0.2f m" % [c.x, c.y, got])
 
 
 func _check_multimesh_budget() -> void:
@@ -221,7 +236,7 @@ func _check_shaders_and_environment() -> void:
 
 
 func _check_gameplay_nodes() -> void:
-	print("[Smoke] gameplay: trees, sword, enemies, rig")
+	print("[Smoke] gameplay: trees, sword, enemies, rig, audio")
 	var main := $Main
 	var trees := main.get_node_or_null(NodePath("WorldGenerator/TreesBody")) as StaticBody3D
 	_expect(trees != null, "TreesBody exists under WorldGenerator")
@@ -235,45 +250,86 @@ func _check_gameplay_nodes() -> void:
 	_expect(sword != null and not sword.picked, "world sword spawned and unpicked")
 	var enemy_count := 0
 	var first_enemy: Enemy = null
+	var closest_enemy_dist := INF
+	var player := main.get_node_or_null(^"Player") as Player
 	for n in main.get_children():
 		if n is Enemy:
 			enemy_count += 1
+			var e := n as Enemy
 			if first_enemy == null:
-				first_enemy = n as Enemy
-	_expect(enemy_count >= 3, "enemies spawned (%d)" % enemy_count)
+				first_enemy = e
+			if player != null and is_instance_valid(e):
+				closest_enemy_dist = minf(closest_enemy_dist,
+						e.global_position.distance_to(player.global_position))
+	_expect(enemy_count >= 6, "dungeon garrison + barrow guards spawned (%d)" % enemy_count)
+	_expect(closest_enemy_dist > SPAWN_SAFE_RADIUS,
+			"no enemy camps the spawn plateau (closest %0.1f m)" % closest_enemy_dist)
 	if first_enemy != null:
 		var hp0 := first_enemy.hp
 		first_enemy.take_damage(10.0, first_enemy.global_position + Vector3(1.0, 0.0, 0.0))
 		_expect(absf(first_enemy.hp - (hp0 - 10.0)) < 0.001, "enemy takes damage")
 		first_enemy.take_damage(9999.0, first_enemy.global_position)
 		_expect(first_enemy._state == Enemy.State.DEAD, "enemy dies on lethal damage")
-	var player := main.get_node_or_null(^"Player") as Player
-	_expect(player != null, "Player exists")
-	if player != null:
-		_expect(player.get_node_or_null(^"Rig") is CharacterRig,
-				"player has the procedural rig (no capsule mesh)")
-		_expect(CharacterRig.EYE_Z < 0.0, "rig faces -Z (eyes on the forward side)")
-		if sword != null:
-			sword.try_pick_up(player)
-			_expect(player.has_sword, "sword pickup registers in the inventory")
-			_expect(player.has_item("steel_sword"), "sword lands in the inventory list")
-			player.toggle_equip()
-			_expect(player.sword_equipped and player.hand_sword.visible,
-					"equipping shows the sword in hand")
-			player.toggle_equip()
-			_expect(not player.sword_equipped, "unequipping hides the sword")
-			# First person: the body hides, the camera viewmodel shows instead.
-			player.camera_distance = 0.0
-			player.toggle_equip()
-			player._update_camera()
-			var body_rig := player.get_node_or_null(^"Rig") as Node3D
-			var fpn := player.get_node_or_null(^"CameraPivot/Camera3D/FPWeapon") as Node3D
-			_expect(body_rig != null and not body_rig.visible, "first person hides the body rig")
-			_expect(fpn != null, "FP viewmodel exists under the camera")
-			_expect(fpn != null and fpn.visible, "equipped sword is visible in first person")
-			player.camera_distance = 4.2
-			player._update_camera()
-			player.toggle_equip()
+	var audio := main.get_node_or_null(^"AudioManager") as AudioManager
+	_expect(audio != null and audio.stream_count() >= 15, "audio manager synthesized its streams")
+	if player == null:
+		return
+	_expect(player.get_node_or_null(^"Rig") is CharacterRig,
+			"player has the procedural rig (no capsule mesh)")
+	_expect(CharacterRig.EYE_Z < 0.0, "rig faces -Z (eyes on the forward side)")
+	if sword != null:
+		sword.try_pick_up(player)
+		_expect(player.has_sword, "sword pickup registers in the inventory")
+		_expect(player.has_item("steel_sword"), "sword lands in the inventory list")
+		player.toggle_equip()
+		_expect(player.sword_equipped and player.hand_sword.visible,
+				"equipping shows the sword in hand")
+		player.toggle_equip()
+		_expect(not player.sword_equipped, "unequipping hides the sword")
+		# First person: the body hides, the camera viewmodel shows instead.
+		player.camera_distance = 0.0
+		player.toggle_equip()
+		player._update_camera()
+		var body_rig := player.get_node_or_null(^"Rig") as Node3D
+		var fpn := player.get_node_or_null(^"CameraPivot/Camera3D/FPWeapon") as Node3D
+		_expect(body_rig != null and not body_rig.visible, "first person hides the body rig")
+		_expect(fpn != null, "FP viewmodel exists under the camera")
+		_expect(fpn != null and fpn.visible, "equipped sword is visible in first person")
+		player.camera_distance = 4.2
+		player._update_camera()
+		player.toggle_equip()
+		# Cutscene camera takeover must keep the hero visible in first person.
+		player.camera_distance = 0.0
+		player._update_camera()
+		player.set_cutscene_mode(true)
+		_expect(body_rig != null and body_rig.visible,
+				"cutscene mode forces the body rig visible in first person")
+		player.set_cutscene_mode(false)
+		player._update_camera()
+		_expect(body_rig != null and not body_rig.visible,
+				"cutscene mode release restores first-person state")
+		player.camera_distance = 4.2
+		player._update_camera()
+		# Shield: give, attach, equip.
+		player.give_shield()
+		_expect(player.has_shield, "shield grant registers")
+		_expect(player.rig.shield_mesh != null, "shield mesh attached to the rig")
+		player.toggle_shield_equip()
+		_expect(player.shield_equipped, "shield equips to the left hand")
+		# Progression: gold, XP, supplies.
+		var gold0 := player.gold
+		player.add_gold(7)
+		_expect(player.gold == gold0 + 7, "gold accumulates")
+		var xp0 := player.xp
+		player.gain_xp(10)
+		_expect(player.xp == xp0 + 10, "xp accumulates")
+		player.add_supply("health_potion", 1)
+		_expect(player.supply_count("health_potion") == 1, "potions stack")
+		player.take_damage(50.0, player.global_position + Vector3(0.0, 0.0, 3.0))
+		var hp_after_hit := player.hp
+		_expect(hp_after_hit < player.max_hp, "unblocked hit wounds the player")
+		_expect(player.use_supply("health_potion"), "potion drinks")
+		_expect(player.hp > hp_after_hit, "potion heals")
 
 
 func _check_story() -> void:
@@ -286,15 +342,20 @@ func _check_story() -> void:
 	_expect(cutscene != null, "Cutscene node exists")
 	if qm == null or player == null:
 		return
-	_expect(ItemDB.ITEMS.size() >= 3, "item database has the Act I items")
+	_expect(ItemDB.ITEMS.size() >= 6, "item database has the Act I items")
 	_expect(qm.is_active("ash"), "intro finished and quest 'Пепел' started")
 
 	var camp := main.get_node_or_null(NodePath("Camp")) as Landmark
 	var village := main.get_node_or_null(NodePath("Village")) as Landmark
 	var barrow := main.get_node_or_null(NodePath("Barrow")) as Landmark
+	var dungeon := main.get_node_or_null(NodePath("Dungeon")) as Landmark
 	_expect(camp != null, "camp landmark spawned")
 	_expect(village != null and village.npc != null, "village spawned with Ingvar")
+	_expect(village != null and village.get_node_or_null(NodePath("VillageChest")) != null,
+			"village spawned with a supply chest")
 	_expect(barrow != null and barrow.echo_point != null, "barrow spawned with the echo stone")
+	_expect(dungeon != null and dungeon.get_node_or_null(NodePath("DungeonChest")) != null,
+			"dungeon spawned with the boss chest")
 
 	# The campfire echo, played instantly, advances 'Пепел' to stage 1.
 	if camp != null and camp.echo_point != null:
@@ -325,6 +386,7 @@ func _check_story() -> void:
 		var victim := barrow_draugrs[0]
 		victim.take_damage(9999.0, victim.global_position)
 		_expect(qm.counter_progress() == "(1/3)", "kill counter reads (1/3)")
+		_expect(player.xp > 0 or player.level > 1, "the kill granted XP")
 	_expect(player.add_item("ashen_shard"), "shard can enter the inventory")
 	_expect(player.has_item("ashen_shard"), "shard stays in the inventory")
 	_expect(qm.get_marker(StoryData.MARKER_VILLAGE) != Vector3.INF,

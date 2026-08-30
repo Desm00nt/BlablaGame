@@ -45,7 +45,8 @@ adjustment_enabled = true
 adjustment_saturation = 1.0
 fog_enabled = true
 fog_light_color = Color(0.7, 0.78, 0.88, 1)
-fog_density = 0.008
+; Lighter fog than the 200 m world: a bigger map needs longer sight lines.
+fog_density = 0.0055
 fog_aerial_perspective = 0.4
 sdfgi_enabled = false
 ss_reflections_enabled = false
@@ -63,9 +64,11 @@ shader_parameter/snow_line = 16.0
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_terrain"]
 material = SubResource("ShaderMaterial_terrain")
-size = Vector2(200, 200)
-subdivide_width = 96
-subdivide_depth = 96
+; 400 x 400 m (4x the original area). 192 subdivisions keep the ~2.08 m cell
+; size the collision and prop placement were tuned for.
+size = Vector2(400, 400)
+subdivide_width = 192
+subdivide_depth = 192
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_water"]
 render_priority = 0
@@ -74,9 +77,9 @@ shader_parameter/wave_height = 0.16
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_water"]
 material = SubResource("ShaderMaterial_water")
-size = Vector2(200, 200)
-subdivide_width = 32
-subdivide_depth = 32
+size = Vector2(400, 400)
+subdivide_width = 64
+subdivide_depth = 64
 
 [node name="Main" type="Node3D"]
 script = ExtResource("1")
@@ -90,18 +93,20 @@ light_color = Color(1, 0.96, 0.9, 1)
 light_energy = 1.25
 shadow_enabled = true
 directional_shadow_mode = 1
-directional_shadow_max_distance = 60.0
+; The world grew 4x in area - the shadow horizon grows with it. Same 2048
+; atlas as before, so the cost stays flat, only the texel density eases off.
+directional_shadow_max_distance = 95.0
 directional_shadow_split_1 = 0.25
 directional_shadow_blend_splits = true
 
 [node name="Terrain" type="MeshInstance3D" parent="."]
 mesh = SubResource("PlaneMesh_terrain")
-custom_aabb = AABB(-100, -10, -100, 200, 32, 200)
+custom_aabb = AABB(-200, -10, -200, 400, 32, 400)
 
 [node name="Water" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1.5, 0)
 mesh = SubResource("PlaneMesh_water")
-custom_aabb = AABB(-100, -1.5, -100, 200, 3, 200)
+custom_aabb = AABB(-200, -1.5, -200, 400, 3, 400)
 
 [node name="WorldGenerator" type="Node3D" parent="."]
 script = ExtResource("7")
